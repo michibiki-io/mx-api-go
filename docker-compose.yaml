@@ -1,0 +1,22 @@
+services:
+  api:
+    image: michibiki/mx-api:0.1.0
+    restart: always
+    environment:
+      SMTP_CLIENT_USERNAME: noreply@michibiki.io
+      SMTP_CLIENT_PASSWORD: sIq7rYa4CQgmuTlpAOOSqQM7ohzu92CkdaCN9Sd47NNm6swqclO9xKlrtsJlMI3s
+      MX_API_CONFIG: /etc/mx-api/config.yaml
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs/config.yaml:/etc/mx-api/config.yaml:ro
+      - ./templates:/app/templates:ro
+
+  frontend:
+    image: nginx:1.29-alpine
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+    volumes:
+      - ./dev/frontend:/usr/share/nginx/html:ro

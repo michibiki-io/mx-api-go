@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>mx-api dev console</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <div class="toolbar">
+          <div>
+            <h1>mx-api</h1>
+            <p id="schema-state">Loading form schema</p>
+          </div>
+          <label class="api-base">
+            <span>API base</span>
+            <input id="api-base" type="url" value="http://localhost:8080">
+          </label>
+        </div>
+
+        <form id="contact-form" class="form" autocomplete="on"></form>
+
+        <div class="actions">
+          <button id="validate" type="button">Validate</button>
+          <button id="send" type="button">Send mail</button>
+        </div>
+      </section>
+
+      <aside class="result-panel">
+        <div class="result-header">
+          <h2>Response</h2>
+          <div class="response-meta">
+            <span id="response-time">Not requested</span>
+            <span id="status-badge">Idle</span>
+          </div>
+        </div>
+        <pre id="response">{}</pre>
+      </aside>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
