@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>New contact request</title>
+  </head>
+  <body>
+    <p>A new contact request has been submitted by {{ name }} at {{ contact_name }}.</p>
+    <table>
+      <tbody>
+        {% for field in fields %}
+        <tr>
+          <td>{{ field.Label }}</td>
+          <td>{{ field.HTMLValue|safe }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>

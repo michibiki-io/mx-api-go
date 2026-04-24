@@ -1,0 +1,81 @@
+server:
+  context_path: "/contact"
+  port: 8080
+
+security:
+  allowed_origins:
+    - "www.example.com"
+    - "localhost:5173"
+
+smtp:
+  server_addr: "smtp.example.com:465"
+  authentication_enabled: true
+  tls_mode: "implicit"
+
+mail:
+  from: "noreply@example.com"
+  recipients:
+    - "contact@example.com"
+  subject: "We received an inquiry from a customer"
+  template_path: "/etc/mx-api/templates/default_mail_template.html"
+  contact_name: "Example Site"
+  homepage_url: "https://www.example.com"
+  timezone: "Asia/Tokyo"
+  submitted_at_format: "2006-01-02 12:01:02 UTC"
+
+form:
+  fields:
+    - name: "name"
+      label: "Name"
+      type: "text"
+      required: true
+      rules: ["required"]
+    - name: "email"
+      label: "Email"
+      type: "email"
+      required: true
+      rules: ["required", "email"]
+    - name: "tel"
+      label: "Tel"
+      type: "tel"
+      rules: ["jp_phone"]
+    - name: "organization"
+      label: "Organization"
+      type: "text"
+    - name: "subject"
+      label: "Subject"
+      type: "text"
+      required: true
+      rules: ["required"]
+    - name: "message"
+      label: "Message"
+      type: "textarea"
+      required: true
+      rules: ["required", "message_length"]
+    - name: "plan"
+      label: "Plan"
+      type: "select"
+      options: ["basic", "business", "enterprise"]
+      rules: ["plan"]
+
+validation:
+  required:
+    tag: "required"
+    code: "validation_required"
+    message: "cannot be blank"
+  email:
+    tag: "email"
+    code: "validation_is_email"
+    message: "must be a valid email address"
+  jp_phone:
+    tag: "jp_phone"
+    code: "validation_is_phone_number"
+    message: "must be a valid phone number in Japan"
+  message_length:
+    tag: "max=4000"
+    code: "validation_max"
+    message: "must be 4000 characters or less"
+  plan:
+    tag: "oneof=basic business enterprise"
+    code: "validation_oneof"
+    message: "must be one of the configured values"
