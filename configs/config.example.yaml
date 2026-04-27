@@ -52,11 +52,6 @@ form:
       type: "textarea"
       required: true
       rules: ["required", "message_length"]
-    - name: "plan"
-      label: "Plan"
-      type: "select"
-      options: ["basic", "business", "enterprise"]
-      rules: ["plan"]
 
 validation:
   required:
