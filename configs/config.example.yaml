@@ -17,7 +17,7 @@ mail:
   recipients:
     - "contact@example.com"
   subject: "We received an inquiry from a customer"
-  template_path: "/etc/mx-api/templates/default_mail_template.html"
+  template_path: "default_mail_template.html"
   contact_name: "Example Site"
   homepage_url: "https://www.example.com"
   timezone: "Asia/Tokyo"

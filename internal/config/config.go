@@ -128,7 +128,7 @@ func Default() *Config {
 			From:                   "noreply@example.com",
 			Recipients:             []string{"bcc@example.com"},
 			Subject:                "We received an inquiry from a customer",
-			TemplatePath:           "./templates/default_mail_template.html",
+			TemplatePath:           "default_mail_template.html",
 			ContactName:            "Homepage",
 			HomepageURL:            "https://example.com",
 			Timezone:               "UTC",

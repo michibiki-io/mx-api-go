@@ -12,7 +12,6 @@ RUN go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
-COPY templates ./templates
 RUN CGO_ENABLED=0 go test ./...
 RUN target_os="${TARGETOS:-linux}" && \
     target_arch="${TARGETARCH:-$(go env GOARCH)}" && \
@@ -25,7 +24,6 @@ WORKDIR /app
 
 COPY --from=builder /out/mx-api /app/mx-api
 COPY configs/config.example.yaml /etc/mx-api/config.yaml
-COPY templates /app/templates
 
 ENV MX_API_CONFIG=/etc/mx-api/config.yaml
 

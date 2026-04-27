@@ -1,5 +1,7 @@
 services:
   api:
+    build:
+      context: .
     image: michibiki/mx-api:0.1.0
     restart: always
     env_file:
@@ -10,7 +12,6 @@ services:
       - "8080:8080"
     volumes:
       - ./configs/config.yaml:/etc/mx-api/config.yaml:ro
-      - ./templates:/app/templates:ro
 
   frontend:
     image: nginx:1.29-alpine
