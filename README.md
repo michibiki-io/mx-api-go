@@ -94,11 +94,11 @@ SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SM
 
 ### English Mail Templates
 
-Templates are Jinja-style files rendered with Pongo2. Configure the active template with:
+Templates are Jinja-style files rendered with Pongo2. The default template is embedded in the binary. Configure another file path when you need to replace it:
 
 ```yaml
 mail:
-  template_path: "/etc/mx-api/templates/default_mail_template.html"
+  template_path: "default_mail_template.html"
   timezone: "Asia/Tokyo"
   submitted_at_format: "2006-01-02 15:04:05 MST"
 ```
@@ -245,11 +245,11 @@ validation:
 
 ### メールテンプレート
 
-メールテンプレートは Jinja-style template として Pongo2 で render します。差し替える場合は `mail.template_path` を変更します。
+メールテンプレートは Jinja-style template として Pongo2 で render します。デフォルトテンプレートはバイナリに埋め込まれます。差し替える場合は `mail.template_path` に別のファイルパスを指定します。
 
 ```yaml
 mail:
-  template_path: "/etc/mx-api/templates/default_mail_template.html"
+  template_path: "default_mail_template.html"
   timezone: "Asia/Tokyo"
   submitted_at_format: "2006-01-02 15:04:05 MST"
 ```

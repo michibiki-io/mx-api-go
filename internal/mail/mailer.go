@@ -4,17 +4,30 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"embed"
+	"errors"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net"
 	"net/mail"
 	"net/smtp"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/flosch/pongo2/v6"
 	"github.com/michibiki-io/mx-api-go/internal/config"
 )
+
+const (
+	defaultTemplateName       = "default_mail_template.html"
+	defaultSimpleTemplateName = "default_mail_template_simple.html"
+)
+
+//go:embed templates/*.html
+var defaultTemplates embed.FS
 
 type Message struct {
 	From       string
@@ -36,7 +49,7 @@ func NewSMTPSender(cfg *config.Config) *SMTPSender {
 }
 
 func RenderTemplate(path string, data map[string]any) (string, error) {
-	tpl, err := pongo2.FromFile(path)
+	tpl, err := loadTemplate(path)
 	if err != nil {
 		return "", err
 	}
@@ -45,6 +58,38 @@ func RenderTemplate(path string, data map[string]any) (string, error) {
 		return "", err
 	}
 	return rendered, nil
+}
+
+func loadTemplate(path string) (*pongo2.Template, error) {
+	if strings.TrimSpace(path) != "" {
+		if _, err := os.Stat(path); err == nil {
+			return pongo2.FromFile(path)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+
+	if name := embeddedTemplateName(path); name != "" {
+		content, err := defaultTemplates.ReadFile("templates/" + name)
+		if err != nil {
+			return nil, err
+		}
+		return pongo2.FromString(string(content))
+	}
+
+	return pongo2.FromFile(path)
+}
+
+func embeddedTemplateName(path string) string {
+	cleanPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	switch cleanPath {
+	case ".", "", defaultTemplateName, "templates/" + defaultTemplateName, "/app/templates/" + defaultTemplateName, "/etc/mx-api/templates/" + defaultTemplateName:
+		return defaultTemplateName
+	case defaultSimpleTemplateName, "templates/" + defaultSimpleTemplateName, "/app/templates/" + defaultSimpleTemplateName, "/etc/mx-api/templates/" + defaultSimpleTemplateName:
+		return defaultSimpleTemplateName
+	default:
+		return ""
+	}
 }
 
 func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
@@ -97,10 +142,13 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	if err != nil {
 		return fmt.Errorf("smtp DATA: %w", err)
 	}
-	defer writer.Close()
 
 	if _, err := writer.Write(buildMIMEMessage(msg)); err != nil {
+		_ = writer.Close()
 		return fmt.Errorf("write smtp body: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("finish smtp DATA: %w", err)
 	}
 	return nil
 }
