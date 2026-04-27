@@ -7,11 +7,11 @@ services:
     env_file:
       - ./dev/.env
     environment:
-      MX_API_CONFIG: /etc/mx-api/config.yaml
+      MX_API_CONFIG: /etc/mx-api/configs/config.yaml
     ports:
       - "8080:8080"
     volumes:
-      - ./configs/config.yaml:/etc/mx-api/config.yaml:ro
+      - ./configs:/etc/mx-api/configs:ro
 
   frontend:
     image: nginx:1.29-alpine

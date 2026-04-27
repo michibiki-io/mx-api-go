@@ -67,8 +67,30 @@ cp configs/config.example.yaml configs/config.yaml
 
 By default, `mx-api` tries to load `./configs/config.yaml` when it exists. Set `MX_API_CONFIG` or `CONFIG_PATH` to load another YAML file.
 
+After loading the main config, `mx-api` also loads `config.override.yaml` from the same directory when it exists. Set `MX_API_CONFIG_OVERRIDE` or `CONFIG_OVERRIDE_PATH` to load an override file from another path. Override files are applied after `config.yaml` and before environment variables.
+
+Use `config.override.yaml` when you only need to patch or delete a small part of the default config. Normal scalar values are overwritten, `mail.extra` and `validation` entries are merged by key, and entries set to `null` are deleted. `form.fields` is patched by `name`; `_delete: true` removes a matching field and is ignored when the field does not exist.
+
+```yaml
+form:
+  fields:
+    - name: "organization"
+      _delete: true
+
+    - name: "subject"
+      required: false
+      rules: []
+
+validation:
+  message_length: null
+```
+
 The following environment variables are supported:
 
+- `MX_API_CONFIG`
+- `CONFIG_PATH`
+- `MX_API_CONFIG_OVERRIDE`
+- `CONFIG_OVERRIDE_PATH`
 - `CONTEXT_PATH`
 - `BIND_PORT`
 - `MODE`
@@ -168,8 +190,30 @@ cp configs/config.example.yaml configs/config.yaml
 
 `mx-api` はデフォルトで `./configs/config.yaml` が存在する場合に読み込みます。別の YAML を使う場合は `MX_API_CONFIG` または `CONFIG_PATH` を指定します。
 
+main config の読み込み後、同じディレクトリに `config.override.yaml` があれば追加で読み込みます。別パスの override file を使う場合は `MX_API_CONFIG_OVERRIDE` または `CONFIG_OVERRIDE_PATH` を指定します。override file は `config.yaml` の後、環境変数の前に適用されます。
+
+デフォルト config の一部だけを変更・削除したい場合は `config.override.yaml` を使います。通常の scalar 値は上書きされ、`mail.extra` と `validation` は key 単位で merge されます。key に `null` を指定すると削除されます。`form.fields` は `name` をキーに patch され、`_delete: true` は一致する field を削除します。一致する field がない場合は無視されます。
+
+```yaml
+form:
+  fields:
+    - name: "organization"
+      _delete: true
+
+    - name: "subject"
+      required: false
+      rules: []
+
+validation:
+  message_length: null
+```
+
 以下の環境変数を利用できます。
 
+- `MX_API_CONFIG`
+- `CONFIG_PATH`
+- `MX_API_CONFIG_OVERRIDE`
+- `CONFIG_OVERRIDE_PATH`
 - `CONTEXT_PATH`
 - `BIND_PORT`
 - `MODE`

@@ -1,2 +1,3 @@
 configs/config.yaml
+configs/config.override.yaml
 dev/.env

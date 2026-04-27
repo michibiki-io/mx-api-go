@@ -1,0 +1,17 @@
+# Copy this file to configs/config.override.yaml when you only need to patch
+# selected values from configs/config.yaml or the built-in defaults.
+
+form:
+  fields:
+    # Remove a default field. Missing fields are ignored.
+    - name: "organization"
+      _delete: true
+
+    # Patch an existing field by name.
+    - name: "subject"
+      required: false
+      rules: []
+
+# Delete one validation rule by key.
+validation:
+  message_length: null
