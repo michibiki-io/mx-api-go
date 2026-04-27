@@ -13,6 +13,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	defaultConfigPath         = "./configs/config.yaml"
+	defaultConfigOverrideName = "config.override.yaml"
+)
+
 type Config struct {
 	Server     ServerConfig              `yaml:"server" json:"server"`
 	Security   SecurityConfig            `yaml:"security" json:"security"`
@@ -89,7 +94,7 @@ func Load(path string) (*Config, error) {
 	cfg := Default()
 	configPath := firstNonEmpty(path, os.Getenv("MX_API_CONFIG"), os.Getenv("CONFIG_PATH"))
 	if configPath == "" {
-		configPath = "./configs/config.yaml"
+		configPath = defaultConfigPath
 	}
 
 	if fileExists(configPath) {
@@ -102,9 +107,27 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	overridePath := firstNonEmpty(os.Getenv("MX_API_CONFIG_OVERRIDE"), os.Getenv("CONFIG_OVERRIDE_PATH"), defaultOverridePath(configPath))
+	if fileExists(overridePath) {
+		raw, err := os.ReadFile(overridePath)
+		if err != nil {
+			return nil, fmt.Errorf("read config override: %w", err)
+		}
+		if err := applyOverride(cfg, raw); err != nil {
+			return nil, fmt.Errorf("parse config override: %w", err)
+		}
+	}
+
 	applyEnv(cfg)
 	normalize(cfg)
 	return cfg, nil
+}
+
+func defaultOverridePath(configPath string) string {
+	if configPath == "" {
+		return filepath.Join("./configs", defaultConfigOverrideName)
+	}
+	return filepath.Join(filepath.Dir(configPath), defaultConfigOverrideName)
 }
 
 func Default() *Config {
@@ -150,6 +173,229 @@ func Default() *Config {
 			"jp_phone": {Tag: "jp_phone", Code: "validation_is_phone_number", Message: "must be a valid phone number in Japan"},
 		},
 	}
+}
+
+func applyOverride(cfg *Config, raw []byte) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return err
+	}
+	if len(root.Content) == 0 || isNullNode(root.Content[0]) {
+		return nil
+	}
+
+	doc := root.Content[0]
+	if doc.Kind != yaml.MappingNode {
+		return fmt.Errorf("root must be a mapping")
+	}
+
+	fieldsNode := extractFormFieldsNode(doc)
+	mailExtraNode := extractMailExtraNode(doc)
+	validationNode := mappingValue(doc, "validation")
+	removeMappingKey(doc, "validation")
+
+	if len(doc.Content) > 0 {
+		if err := doc.Decode(cfg); err != nil {
+			return err
+		}
+	}
+	if err := applyValidationOverride(cfg, validationNode); err != nil {
+		return err
+	}
+	if err := applyMailExtraOverride(cfg, mailExtraNode); err != nil {
+		return err
+	}
+	if err := applyFieldOverrides(cfg, fieldsNode); err != nil {
+		return err
+	}
+	return nil
+}
+
+func extractFormFieldsNode(doc *yaml.Node) *yaml.Node {
+	formNode := mappingValue(doc, "form")
+	if formNode == nil || formNode.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	fieldsNode := mappingValue(formNode, "fields")
+	removeMappingKey(formNode, "fields")
+	if len(formNode.Content) == 0 {
+		removeMappingKey(doc, "form")
+	}
+	return fieldsNode
+}
+
+func extractMailExtraNode(doc *yaml.Node) *yaml.Node {
+	mailNode := mappingValue(doc, "mail")
+	if mailNode == nil || mailNode.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	extraNode := mappingValue(mailNode, "extra")
+	removeMappingKey(mailNode, "extra")
+	if len(mailNode.Content) == 0 {
+		removeMappingKey(doc, "mail")
+	}
+	return extraNode
+}
+
+func applyValidationOverride(cfg *Config, node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if isNullNode(node) {
+		cfg.Validation = map[string]ValidationRule{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("validation must be a mapping")
+	}
+	if cfg.Validation == nil {
+		cfg.Validation = map[string]ValidationRule{}
+	}
+
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		key := keyNode.Value
+		if isNullNode(valueNode) {
+			delete(cfg.Validation, key)
+			continue
+		}
+
+		rule := cfg.Validation[key]
+		if err := valueNode.Decode(&rule); err != nil {
+			return fmt.Errorf("validation.%s: %w", key, err)
+		}
+		cfg.Validation[key] = rule
+	}
+	return nil
+}
+
+func applyMailExtraOverride(cfg *Config, node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if isNullNode(node) {
+		cfg.Mail.Extra = map[string]string{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("mail.extra must be a mapping")
+	}
+	if cfg.Mail.Extra == nil {
+		cfg.Mail.Extra = map[string]string{}
+	}
+
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		key := keyNode.Value
+		if isNullNode(valueNode) {
+			delete(cfg.Mail.Extra, key)
+			continue
+		}
+
+		var value string
+		if err := valueNode.Decode(&value); err != nil {
+			return fmt.Errorf("mail.extra.%s: %w", key, err)
+		}
+		cfg.Mail.Extra[key] = value
+	}
+	return nil
+}
+
+func applyFieldOverrides(cfg *Config, node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if isNullNode(node) {
+		cfg.Form.Fields = nil
+		return nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return fmt.Errorf("form.fields must be a sequence")
+	}
+
+	for _, item := range node.Content {
+		if item.Kind != yaml.MappingNode {
+			return fmt.Errorf("form.fields item at line %d must be a mapping", item.Line)
+		}
+
+		var meta struct {
+			Name   string `yaml:"name"`
+			Delete bool   `yaml:"_delete"`
+		}
+		if err := item.Decode(&meta); err != nil {
+			return fmt.Errorf("form.fields item at line %d: %w", item.Line, err)
+		}
+		meta.Name = strings.TrimSpace(meta.Name)
+		if meta.Name == "" {
+			return fmt.Errorf("form.fields item at line %d must include name", item.Line)
+		}
+
+		fieldIndex := findFieldIndex(cfg.Form.Fields, meta.Name)
+		if meta.Delete {
+			if fieldIndex >= 0 {
+				cfg.Form.Fields = append(cfg.Form.Fields[:fieldIndex], cfg.Form.Fields[fieldIndex+1:]...)
+			}
+			continue
+		}
+
+		if fieldIndex >= 0 {
+			field := cfg.Form.Fields[fieldIndex]
+			if err := item.Decode(&field); err != nil {
+				return fmt.Errorf("form.fields.%s: %w", meta.Name, err)
+			}
+			cfg.Form.Fields[fieldIndex] = field
+			continue
+		}
+
+		var field FieldConfig
+		if err := item.Decode(&field); err != nil {
+			return fmt.Errorf("form.fields.%s: %w", meta.Name, err)
+		}
+		cfg.Form.Fields = append(cfg.Form.Fields, field)
+	}
+	return nil
+}
+
+func findFieldIndex(fields []FieldConfig, name string) int {
+	for i := range fields {
+		if strings.EqualFold(fields[i].Name, name) {
+			return i
+		}
+	}
+	return -1
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func removeMappingKey(node *yaml.Node, key string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			node.Content = append(node.Content[:i], node.Content[i+2:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func isNullNode(node *yaml.Node) bool {
+	return node == nil || (node.Kind == yaml.ScalarNode && node.Tag == "!!null")
 }
 
 func applyEnv(cfg *Config) {
