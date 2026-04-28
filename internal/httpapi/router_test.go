@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,8 +81,57 @@ func TestValidatePostSuccessUsesOk(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if rec.Body.String() != `{"status":"Ok"}` {
-		t.Fatalf("body = %s", rec.Body.String())
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["status"] != "Ok" {
+		t.Fatalf("status payload = %q", body["status"])
+	}
+	if body["version"] == "" {
+		t.Fatalf("version payload missing: %s", rec.Body.String())
+	}
+}
+
+func TestStatusEndpointIncludesVersion(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["status"] != "Ok" {
+		t.Fatalf("status payload = %q", body["status"])
+	}
+	if body["version"] == "" {
+		t.Fatalf("version payload missing: %s", rec.Body.String())
+	}
+}
+
+func TestSchemaIncludesVersion(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/schema", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	version, ok := body["version"].(string)
+	if !ok || version == "" {
+		t.Fatalf("version payload missing: %s", rec.Body.String())
 	}
 }
 

@@ -36,12 +36,13 @@
 
 The service exposes the following endpoints:
 
-- `GET /` -> `{"status":"Ok"}`
-- `GET /helthz` -> `{"status":"Ok"}`
-- `GET /api/v1/validate` -> `{"status":"Ok"}`
-- `POST /api/v1/validate` -> `{"status":"Ok"}` when validation passes
-- `GET /api/v1/sendmail` -> `{"status":"Ok"}`
-- `POST /api/v1/sendmail` -> `{"status":"Ok"}` when mail is sent
+- `GET /` -> `{"status":"Ok","version":"<version>"}`
+- `GET /helthz` -> `{"status":"Ok","version":"<version>"}`
+- `GET /api/v1/validate` -> `{"status":"Ok","version":"<version>"}`
+- `POST /api/v1/validate` -> `{"status":"Ok","version":"<version>"}` when validation passes
+- `GET /api/v1/sendmail` -> `{"status":"Ok","version":"<version>"}`
+- `POST /api/v1/sendmail` -> `{"status":"Ok","version":"<version>"}` when mail is sent
+- `GET /api/v1/schema` -> includes `version`
 
 Validation errors use this response shape:
 
@@ -150,6 +151,7 @@ docker build -t mx-api .
 ```
 
 The Docker image builds and tests the Go binary during the build stage.
+At build time, the image reads the repository root `VERSION` file and injects it into the binary. Local `go build` without matching `-ldflags` falls back to `dev`.
 
 ## 日本語
 
@@ -159,12 +161,13 @@ The Docker image builds and tests the Go binary during the build stage.
 
 このサービスは以下の endpoint を提供します。
 
-- `GET /` -> `{"status":"Ok"}`
-- `GET /helthz` -> `{"status":"Ok"}`
-- `GET /api/v1/validate` -> `{"status":"Ok"}`
-- `POST /api/v1/validate` -> validation 成功時 `{"status":"Ok"}`
-- `GET /api/v1/sendmail` -> `{"status":"Ok"}`
-- `POST /api/v1/sendmail` -> メール送信成功時 `{"status":"Ok"}`
+- `GET /` -> `{"status":"Ok","version":"<version>"}`
+- `GET /helthz` -> `{"status":"Ok","version":"<version>"}`
+- `GET /api/v1/validate` -> `{"status":"Ok","version":"<version>"}`
+- `POST /api/v1/validate` -> validation 成功時 `{"status":"Ok","version":"<version>"}`
+- `GET /api/v1/sendmail` -> `{"status":"Ok","version":"<version>"}`
+- `POST /api/v1/sendmail` -> メール送信成功時 `{"status":"Ok","version":"<version>"}`
+- `GET /api/v1/schema` -> `version` を含む
 
 validation error は以下のレスポンス形式です。
 

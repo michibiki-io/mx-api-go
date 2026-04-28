@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
+	"github.com/michibiki-io/mx-api-go/internal/version"
 	"go.uber.org/zap"
 )
 
@@ -87,13 +88,14 @@ func (h *Handler) sendmailPost(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "Ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "Ok", "version": version.Value()})
 }
 
 func (h *Handler) schema(c *gin.Context) {
 	h.setSchemaCORS(c)
 	c.JSON(http.StatusOK, gin.H{
 		"status":      "Ok",
+		"version":     version.Value(),
 		"contextPath": h.cfg.Server.ContextPath,
 		"apiBasePath": h.cfg.Server.ContextPath + "/api/v1",
 		"fields":      h.cfg.Form.Fields,
