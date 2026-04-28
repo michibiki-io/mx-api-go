@@ -1,22 +1,25 @@
 ARG GO_VERSION=1.26.2
+ARG BUILD_COMMIT=unknown
+ARG BUILD_VERSION=dev
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG BUILD_COMMIT
+ARG BUILD_VERSION
 
 WORKDIR /src
 
 COPY go.mod go.sum* ./
 RUN go mod download
 
-COPY VERSION ./
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go test ./...
 RUN target_os="${TARGETOS:-linux}" && \
     target_arch="${TARGETARCH:-$(go env GOARCH)}" && \
-    version="$(tr -d '\n\r' < VERSION)" && \
+    version="${BUILD_VERSION:-dev}" && \
     CGO_ENABLED=0 GOOS="${target_os}" GOARCH="${target_arch}" \
     go build -trimpath -ldflags="-s -w -X github.com/michibiki-io/mx-api-go/internal/version.value=${version}" -o /out/mx-api ./cmd/mx-api
 

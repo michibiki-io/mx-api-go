@@ -151,7 +151,16 @@ docker build -t mx-api .
 ```
 
 The Docker image builds and tests the Go binary during the build stage.
-At build time, the image reads the repository root `VERSION` file and injects it into the binary. Local `go build` without matching `-ldflags` falls back to `dev`.
+Release automation computes the next version, creates the release tag from the merge commit, and injects the resolved version into the image build with the generic build args `BUILD_VERSION` and `BUILD_COMMIT`. This keeps the workflow reusable across repositories and avoids conflicts with branch protection rules.
+
+You can optionally pass the version and commit hash into a local image build:
+
+```sh
+docker build \
+  --build-arg BUILD_VERSION=0.2.0 \
+  --build-arg BUILD_COMMIT="$(git rev-parse HEAD)" \
+  -t mx-api .
+```
 
 ## 日本語
 
