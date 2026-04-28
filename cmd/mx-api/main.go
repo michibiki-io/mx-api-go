@@ -15,6 +15,7 @@ import (
 	"github.com/michibiki-io/mx-api-go/internal/logging"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
 	"github.com/michibiki-io/mx-api-go/internal/requestvalidator"
+	"github.com/michibiki-io/mx-api-go/internal/version"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +44,11 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("mx-api started", zap.String("address", server.Addr), zap.String("context_path", cfg.Server.ContextPath))
+		logger.Info("mx-api started",
+			zap.String("address", server.Addr),
+			zap.String("context_path", cfg.Server.ContextPath),
+			zap.String("version", version.Value()),
+		)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal("server stopped unexpectedly", zap.Error(err))
 		}

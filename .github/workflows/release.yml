@@ -64,6 +64,48 @@ jobs:
           repo="${GITHUB_REPOSITORY,,}"
           echo "name=ghcr.io/${repo}" >> "${GITHUB_OUTPUT}"
 
+      - name: Prepare release commit
+        if: steps.version.outputs.release_required == 'true'
+        id: release_commit
+        env:
+          GIT_TAG: ${{ steps.version.outputs.git_tag }}
+          DOCKER_TAG: ${{ steps.version.outputs.docker_tag }}
+          TAG_EXISTS: ${{ steps.version.outputs.tag_exists }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin main
+
+          if [ "${TAG_EXISTS}" = "true" ]; then
+            target_sha="$(git rev-list -n 1 "${GIT_TAG}")"
+            git checkout --detach "${target_sha}"
+            echo "release_commit_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if git merge-base --is-ancestor "${MERGE_COMMIT_SHA}" origin/main; then
+            current_version="$(git show origin/main:VERSION 2>/dev/null || true)"
+            if [ "${current_version}" = "${DOCKER_TAG}" ]; then
+              target_sha="$(git rev-parse origin/main)"
+              git checkout --detach "${target_sha}"
+              echo "release_commit_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          fi
+
+          printf '%s\n' "${DOCKER_TAG}" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          if git diff --cached --quiet; then
+            target_sha="${MERGE_COMMIT_SHA}"
+          else
+            git commit -m "chore(release): ${GIT_TAG}"
+            git push origin HEAD:main
+            target_sha="$(git rev-parse HEAD)"
+          fi
+          git checkout --detach "${target_sha}"
+          echo "release_commit_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+
       - name: Create and push release tag
         if: steps.version.outputs.release_required == 'true' && steps.version.outputs.tag_exists != 'true'
         env:
@@ -72,8 +114,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Tag the PR merge commit directly so a newer main HEAD cannot move the release target.
-          git tag -a "${GIT_TAG}" "${MERGE_COMMIT_SHA}" -m "Release ${GIT_TAG}"
+          git tag -a "${GIT_TAG}" "${{ steps.release_commit.outputs.release_commit_sha }}" -m "Release ${GIT_TAG}"
           git push origin "refs/tags/${GIT_TAG}"
 
       - name: Set up QEMU
@@ -114,6 +155,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PMA_GATEWAY_BUILD_COMMIT=${{ steps.release_commit.outputs.release_commit_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
@@ -128,7 +171,7 @@ jobs:
           python3 scripts/release/generate_release_notes.py \
             --repo "${GITHUB_REPOSITORY}" \
             --previous-tag "${PREVIOUS_TAG}" \
-            --target "${MERGE_COMMIT_SHA}" \
+            --target "${{ steps.release_commit.outputs.release_commit_sha }}" \
             --output release-notes.md
 
       - name: Create or update GitHub Release
@@ -136,6 +179,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.git_tag }}
-          target_commitish: ${{ env.MERGE_COMMIT_SHA }}
+          target_commitish: ${{ steps.release_commit.outputs.release_commit_sha }}
           body_path: release-notes.md
           generate_release_notes: false

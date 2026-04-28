@@ -8,6 +8,7 @@ import (
 	"github.com/michibiki-io/mx-api-go/internal/config"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
 	"github.com/michibiki-io/mx-api-go/internal/requestvalidator"
+	"github.com/michibiki-io/mx-api-go/internal/version"
 	"go.uber.org/zap"
 )
 
@@ -58,11 +59,11 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 
 func status(value string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": value})
+		c.JSON(http.StatusOK, gin.H{"status": value, "version": version.Value()})
 	}
 }
 
 func optionStatus(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST")
-	c.JSON(http.StatusOK, gin.H{"status": "Ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "Ok", "version": version.Value()})
 }
