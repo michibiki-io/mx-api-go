@@ -23,7 +23,7 @@ RUN target_os="${TARGETOS:-linux}" && \
     CGO_ENABLED=0 GOOS="${target_os}" GOARCH="${target_arch}" \
     go build -trimpath -ldflags="-s -w -X github.com/michibiki-io/mx-api-go/internal/version.value=${version}" -o /out/mx-api ./cmd/mx-api
 
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM gcr.io/distroless/static-debian13:nonroot AS runtime
 
 WORKDIR /app
 
