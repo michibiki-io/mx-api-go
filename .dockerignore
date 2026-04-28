@@ -2,7 +2,6 @@
 
 !go.mod
 !go.sum
-!VERSION
 !cmd/**
 !internal/**
 !configs/config.example.yaml
