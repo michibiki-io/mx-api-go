@@ -65,8 +65,10 @@ type AdminConfig struct {
 }
 
 type AdminDashboardConfig struct {
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
-	BasePath string `yaml:"base_path" json:"basePath"`
+	Enabled           bool   `yaml:"enabled" json:"enabled"`
+	BasePath          string `yaml:"base_path" json:"basePath"`
+	TimestampFormat   string `yaml:"timestamp_format" json:"timestampFormat"`
+	TimestampTimezone string `yaml:"timestamp_timezone" json:"timestampTimezone"`
 }
 
 type AdminAuthConfig struct {
@@ -199,8 +201,10 @@ func Default() *Config {
 		},
 		Admin: AdminConfig{
 			Dashboard: AdminDashboardConfig{
-				Enabled:  true,
-				BasePath: "/admin",
+				Enabled:           true,
+				BasePath:          "/admin",
+				TimestampFormat:   "2006-01-02 15:04:05 MST",
+				TimestampTimezone: "UTC",
 			},
 			Auth: AdminAuthConfig{
 				Mode:          "header",
@@ -490,6 +494,8 @@ func applyEnv(cfg *Config) {
 
 	setBool(&cfg.Admin.Dashboard.Enabled, "MX_API_ADMIN_DASHBOARD_ENABLED")
 	setString(&cfg.Admin.Dashboard.BasePath, "MX_API_ADMIN_BASE_PATH")
+	setString(&cfg.Admin.Dashboard.TimestampFormat, "MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT")
+	setString(&cfg.Admin.Dashboard.TimestampTimezone, "MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE")
 	setString(&cfg.Admin.Auth.Mode, "MX_API_ADMIN_AUTH_MODE")
 	setString(&cfg.Admin.Auth.UserHeader, "MX_API_ADMIN_AUTH_USER_HEADER")
 	setString(&cfg.Admin.Auth.EmailHeader, "MX_API_ADMIN_AUTH_EMAIL_HEADER")
@@ -544,6 +550,12 @@ func normalize(cfg *Config) {
 		cfg.Server.Port = 8080
 	}
 	cfg.Admin.Dashboard.BasePath = normalizePath(cfg.Admin.Dashboard.BasePath, "/admin")
+	if strings.TrimSpace(cfg.Admin.Dashboard.TimestampFormat) == "" {
+		cfg.Admin.Dashboard.TimestampFormat = "2006-01-02 15:04:05 MST"
+	}
+	if strings.TrimSpace(cfg.Admin.Dashboard.TimestampTimezone) == "" {
+		cfg.Admin.Dashboard.TimestampTimezone = cfg.Mail.Timezone
+	}
 	cfg.Admin.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Admin.Auth.Mode))
 	if cfg.Admin.Auth.Mode == "" {
 		cfg.Admin.Auth.Mode = "header"

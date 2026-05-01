@@ -14,12 +14,16 @@ import (
 func (h *Handler) adminMe(c *gin.Context) {
 	identity := currentAdminIdentity(c)
 	c.JSON(http.StatusOK, gin.H{
-		"mode":         h.cfg.Admin.Auth.Mode,
-		"authDisabled": identity.AuthDisabled,
-		"user":         identity.User,
-		"email":        identity.Email,
-		"groups":       identity.Groups,
-		"version":      version.Value(),
+		"mode":                 h.cfg.Admin.Auth.Mode,
+		"authDisabled":         identity.AuthDisabled,
+		"user":                 identity.User,
+		"email":                identity.Email,
+		"groups":               identity.Groups,
+		"version":              version.Value(),
+		"commit":               version.Commit(),
+		"shortCommit":          version.ShortCommit(),
+		"commitURL":            commitURL(version.Commit()),
+		"auditTimestampFormat": h.cfg.Admin.Dashboard.TimestampFormat,
 	})
 }
 
@@ -94,7 +98,7 @@ func (h *Handler) adminAuditEvents(c *gin.Context) {
 	}
 	h.recordAdminAPI(c, "audit.view", "Admin viewed audit logs")
 	c.JSON(http.StatusOK, gin.H{
-		"items":      page.Items,
+		"items":      h.auditEventResponses(page.Items),
 		"total":      page.Total,
 		"nextCursor": nextCursor,
 	})
@@ -115,7 +119,52 @@ func (h *Handler) adminAuditEvent(c *gin.Context) {
 		return
 	}
 	h.recordAdminAPI(c, "audit.detail.view", "Admin viewed audit log detail")
-	c.JSON(http.StatusOK, event)
+	c.JSON(http.StatusOK, h.auditEventResponse(event))
+}
+
+type auditEventResponse struct {
+	audit.Event
+	TimestampDisplay string `json:"timestampDisplay"`
+}
+
+func (h *Handler) auditEventResponses(events []audit.Event) []auditEventResponse {
+	out := make([]auditEventResponse, 0, len(events))
+	for _, event := range events {
+		out = append(out, h.auditEventResponse(event))
+	}
+	return out
+}
+
+func (h *Handler) auditEventResponse(event audit.Event) auditEventResponse {
+	return auditEventResponse{
+		Event:            event,
+		TimestampDisplay: h.formatAuditTimestamp(event.Timestamp),
+	}
+}
+
+func (h *Handler) formatAuditTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	location := time.UTC
+	if configured := strings.TrimSpace(h.cfg.Admin.Dashboard.TimestampTimezone); configured != "" {
+		if loaded, err := time.LoadLocation(configured); err == nil {
+			location = loaded
+		}
+	}
+	layout := strings.TrimSpace(h.cfg.Admin.Dashboard.TimestampFormat)
+	if layout == "" {
+		layout = time.RFC3339
+	}
+	return value.In(location).Format(layout)
+}
+
+func commitURL(commit string) string {
+	commit = strings.TrimSpace(commit)
+	if commit == "" || commit == "unknown" {
+		return ""
+	}
+	return "https://github.com/michibiki-io/mx-api-go/commit/" + commit
 }
 
 func (h *Handler) adminAuditReset(c *gin.Context) {

@@ -31,8 +31,9 @@ RUN CGO_ENABLED=0 go test ./...
 RUN target_os="${TARGETOS:-linux}" && \
     target_arch="${TARGETARCH:-$(go env GOARCH)}" && \
     version="${BUILD_VERSION:-dev}" && \
+    commit="${BUILD_COMMIT:-unknown}" && \
     CGO_ENABLED=0 GOOS="${target_os}" GOARCH="${target_arch}" \
-    go build -trimpath -ldflags="-s -w -X github.com/michibiki-io/mx-api-go/internal/version.value=${version}" -o /out/mx-api ./cmd/mx-api
+    go build -trimpath -ldflags="-s -w -X github.com/michibiki-io/mx-api-go/internal/version.value=${version} -X github.com/michibiki-io/mx-api-go/internal/version.commit=${commit}" -o /out/mx-api ./cmd/mx-api
 RUN mkdir -p /out/var-lib-mx-api
 
 FROM gcr.io/distroless/static-debian13:nonroot AS runtime

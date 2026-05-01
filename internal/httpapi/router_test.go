@@ -432,6 +432,7 @@ func TestAdminHeaderAuthAllowAndDeny(t *testing.T) {
 func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.Mode = "none"
+	cfg.Admin.Dashboard.TimestampFormat = "2006/01/02 15:04 MST"
 	router, _ := testRouterWithAudit(t, cfg, &fakeSender{})
 	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -448,18 +449,27 @@ func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
 	if body["authDisabled"] != true {
 		t.Fatalf("authDisabled = %#v, want true", body["authDisabled"])
 	}
+	if body["auditTimestampFormat"] != "2006/01/02 15:04 MST" {
+		t.Fatalf("auditTimestampFormat = %#v", body["auditTimestampFormat"])
+	}
+	if body["commit"] == "" || body["shortCommit"] == "" {
+		t.Fatalf("commit fields missing: %#v", body)
+	}
 }
 
 func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.Mode = "none"
+	cfg.Admin.Dashboard.TimestampFormat = "2006-01-02 15:04:05 MST"
+	cfg.Admin.Dashboard.TimestampTimezone = "Asia/Tokyo"
 	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	base := time.Date(2026, 5, 1, 13, 24, 23, 0, time.UTC)
 	for i, event := range []audit.Event{
 		{Actor: "public", Action: "validation.request", Method: "POST", Path: "/api/v1/validate", StatusCode: 400, Result: audit.ResultFailure},
 		{Actor: "public", Action: "mail.send", Method: "POST", Path: "/api/v1/sendmail", StatusCode: 200, Result: audit.ResultSuccess},
 		{Actor: "public", Action: "mail.send", Method: "POST", Path: "/api/v1/sendmail", StatusCode: 400, Result: audit.ResultFailure},
 	} {
-		event.Timestamp = time.Now().UTC().Add(time.Duration(i) * time.Second)
+		event.Timestamp = base.Add(time.Duration(i) * time.Second)
 		if err := store.Record(context.Background(), event); err != nil {
 			t.Fatal(err)
 		}
@@ -473,14 +483,20 @@ func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		Items []audit.Event `json:"items"`
-		Total int           `json:"total"`
+		Items []struct {
+			audit.Event
+			TimestampDisplay string `json:"timestampDisplay"`
+		} `json:"items"`
+		Total int `json:"total"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal body: %v", err)
 	}
 	if body.Total != 2 || len(body.Items) != 1 {
 		t.Fatalf("body = %#v, want total 2 and one item", body)
+	}
+	if !strings.HasSuffix(body.Items[0].TimestampDisplay, "JST") {
+		t.Fatalf("timestampDisplay = %q, want JST suffix", body.Items[0].TimestampDisplay)
 	}
 }
 

@@ -251,6 +251,8 @@ smtp:
 func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	t.Setenv("MX_API_ADMIN_DASHBOARD_ENABLED", "false")
 	t.Setenv("MX_API_ADMIN_BASE_PATH", "ops")
+	t.Setenv("MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT", "2006/01/02 15:04 MST")
+	t.Setenv("MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE", "Asia/Tokyo")
 	t.Setenv("MX_API_ADMIN_AUTH_MODE", "none")
 	t.Setenv("MX_API_ADMIN_AUTH_USER_HEADER", "Remote-User")
 	t.Setenv("MX_API_ADMIN_AUTH_EMAIL_HEADER", "Remote-Email")
@@ -276,6 +278,9 @@ func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	}
 	if cfg.Admin.Dashboard.BasePath != "/ops" {
 		t.Fatalf("BasePath = %q, want /ops", cfg.Admin.Dashboard.BasePath)
+	}
+	if cfg.Admin.Dashboard.TimestampFormat != "2006/01/02 15:04 MST" || cfg.Admin.Dashboard.TimestampTimezone != "Asia/Tokyo" {
+		t.Fatalf("admin timestamp env not applied: %#v", cfg.Admin.Dashboard)
 	}
 	if cfg.Admin.Auth.Mode != "none" || cfg.Admin.Auth.UserHeader != "Remote-User" || cfg.Admin.Auth.EmailHeader != "Remote-Email" || cfg.Admin.Auth.GroupsHeader != "Remote-Groups" {
 		t.Fatalf("admin auth env not applied: %#v", cfg.Admin.Auth)

@@ -11,6 +11,8 @@ services:
       CONTEXT_PATH: /contact
       MX_API_ADMIN_DASHBOARD_ENABLED: "true"
       MX_API_ADMIN_BASE_PATH: /admin
+      MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT: "2006-01-02 15:04:05 MST"
+      MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE: Asia/Tokyo
       # Local docker-compose is for development. Protect real deployments with
       # header auth or an upstream access-control layer.
       MX_API_ADMIN_AUTH_MODE: none

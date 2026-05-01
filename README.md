@@ -1,4 +1,6 @@
-# mx-api
+<p align="center">
+  <img src="docs/images/mx-api-go-logo-str.svg" alt="mx-api-go" width="420">
+</p>
 
 `mx-api` is a small Go service for validating contact-form payloads and sending HTML mail. The binary name is `mx-api`; the Go module is `github.com/michibiki-io/mx-api-go`.
 
@@ -129,6 +131,8 @@ The following environment variables are supported:
 - `MAIL_SUBMITTED_AT_FORMAT`
 - `MX_API_ADMIN_DASHBOARD_ENABLED`
 - `MX_API_ADMIN_BASE_PATH`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE`
 - `MX_API_ADMIN_AUTH_MODE`
 - `MX_API_ADMIN_AUTH_USER_HEADER`
 - `MX_API_ADMIN_AUTH_EMAIL_HEADER`
@@ -163,6 +167,8 @@ admin:
   dashboard:
     enabled: true
     base_path: "/admin"
+    timestamp_format: "2006-01-02 15:04:05 MST"
+    timestamp_timezone: "Asia/Tokyo"
   auth:
     mode: "header"
     user_header: "X-Forwarded-User"
@@ -185,6 +191,8 @@ Authentication modes:
 - `none`: `mx-api` performs no dashboard authentication. The UI shows a visible warning banner. This mode must be protected by upstream access control such as ingress auth, reverse-proxy auth, oauth2-proxy, Authelia, VPN-only exposure, or Basic Auth. Do not expose it directly to the public internet.
 
 Audit logging intentionally avoids sensitive data. It records operational metadata such as timestamp, actor, action, method, path, endpoint, result, status code, request ID, duration, remote address, user agent summary, and high-level error code/message. It does not store Authorization headers, cookies, SMTP credentials, raw request bodies, submitted form contents, full mail body, full message text, or secret tokens.
+
+Audit log timestamps in the dashboard use Go time layouts. Set `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT` and optionally `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE` to change the display, for example `2006-01-02 15:04:05 MST` with `Asia/Tokyo`.
 
 The dashboard reset button opens a confirmation dialog. `POST /_admin/api/v1/audit-events/reset` requires `{"confirmation":"RESET"}`; existing audit events are deleted and a new `audit.reset` marker remains visible.
 
@@ -243,7 +251,7 @@ docker build -t mx-api .
 The Docker image builds and tests the Go binary during the build stage.
 It also builds the embedded Svelte admin dashboard before the Go binary is compiled.
 For container deployments that use SQLite audit storage, mount persistent storage at `/var/lib/mx-api`.
-Release automation computes the next version, creates the release tag from the merge commit, and injects the resolved version into the image build with the generic build args `BUILD_VERSION` and `BUILD_COMMIT`. This keeps the workflow reusable across repositories and avoids conflicts with branch protection rules.
+Release automation computes the next version, creates the release tag from the merge commit, and injects the resolved version into the image build with the generic build args `BUILD_VERSION` and `BUILD_COMMIT`. This keeps the workflow reusable across repositories and avoids conflicts with branch protection rules. The admin dashboard displays both values and links the commit hash to the matching GitHub commit when `BUILD_COMMIT` is available.
 
 You can optionally pass the version and commit hash into a local image build:
 
@@ -353,6 +361,8 @@ validation:
 - `MAIL_SUBMITTED_AT_FORMAT`
 - `MX_API_ADMIN_DASHBOARD_ENABLED`
 - `MX_API_ADMIN_BASE_PATH`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE`
 - `MX_API_ADMIN_AUTH_MODE`
 - `MX_API_ADMIN_AUTH_USER_HEADER`
 - `MX_API_ADMIN_AUTH_EMAIL_HEADER`
@@ -396,6 +406,8 @@ admin:
   dashboard:
     enabled: true
     base_path: "/admin"
+    timestamp_format: "2006-01-02 15:04:05 MST"
+    timestamp_timezone: "Asia/Tokyo"
   auth:
     mode: "header"
     user_header: "X-Forwarded-User"
@@ -418,6 +430,8 @@ audit:
 - `none`: `mx-api` は dashboard の認証を行いません。UI には警告 banner が表示されます。この mode は ingress auth、reverse proxy auth、oauth2-proxy、Authelia、VPN-only exposure、Basic Auth など、必ず upstream の access control で保護してください。public internet に直接公開してはいけません。
 
 監査ログは機密情報を保存しない設計です。記録するのは timestamp、actor、action、method、path、endpoint、result、status code、request ID、duration、remote address、user agent summary、高レベルな error code/message などの運用 metadata です。Authorization header、cookie、SMTP credential、raw request body、送信 form 全体、mail body、message text、secret token は保存しません。
+
+dashboard 上の audit log timestamp は Go の time layout で表示します。`MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT` と、必要に応じて `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE` を設定してください。例: `2006-01-02 15:04:05 MST` と `Asia/Tokyo`。
 
 dashboard の reset button は確認 dialog を開きます。`POST /_admin/api/v1/audit-events/reset` は `{"confirmation":"RESET"}` を要求し、既存の audit event を削除したうえで `audit.reset` marker を 1 件残します。
 
@@ -518,3 +532,4 @@ docker build -t mx-api .
 ```
 
 Docker build stage では Go test と binary build を実行します。
+GitHub Actions では `BUILD_VERSION` と `BUILD_COMMIT` を Docker build に渡します。admin dashboard には version と commit hash が表示され、commit hash は GitHub commit への link になります。
