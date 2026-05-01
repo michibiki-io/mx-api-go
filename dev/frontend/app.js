@@ -7,6 +7,7 @@ const schemaState = document.querySelector("#schema-state");
 
 let fields = [];
 let apiBasePath = "/api/v1";
+let sendInFlightKey = "";
 
 const fieldElement = (field) => {
   const id = `field-${field.name}`;
@@ -40,6 +41,9 @@ const fieldElement = (field) => {
   input.placeholder = field.placeholder || "";
   input.value = field.default || "";
   input.required = Boolean(field.required);
+  if (field.maxLength > 0) {
+    input.maxLength = field.maxLength;
+  }
   wrapper.append(input);
 
   if (field.help) {
@@ -82,17 +86,37 @@ const setResponse = (status, body) => {
   responseBox.textContent = JSON.stringify(body, null, 2);
 };
 
+const newIdempotencyKey = () => {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 const request = async (path) => {
   const baseURL = new URL(apiBaseInput.value);
   const basePath = baseURL.pathname.replace(/\/$/, "");
   const resolvedAPIBasePath = basePath && basePath !== "" ? "/api/v1" : apiBasePath;
-  const res = await fetch(`${apiBaseInput.value}${resolvedAPIBasePath}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload()),
-  });
-  const body = await res.json().catch(() => ({}));
-  setResponse(`${res.status} ${res.statusText}`, body);
+  const headers = { "Content-Type": "application/json" };
+  if (path === "/sendmail") {
+    if (!sendInFlightKey) {
+      sendInFlightKey = newIdempotencyKey();
+    }
+    headers["Idempotency-Key"] = sendInFlightKey;
+  }
+  try {
+    const res = await fetch(`${apiBaseInput.value}${resolvedAPIBasePath}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload()),
+    });
+    const body = await res.json().catch(() => ({}));
+    setResponse(`${res.status} ${res.statusText}`, body);
+  } finally {
+    if (path === "/sendmail") {
+      sendInFlightKey = "";
+    }
+  }
 };
 
 const loadSchema = async () => {

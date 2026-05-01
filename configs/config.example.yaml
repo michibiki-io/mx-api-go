@@ -6,11 +6,20 @@ security:
   allowed_origins:
     - "www.example.com"
     - "localhost:5173"
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
+    failure_requests_per_minute: 20
+  idempotency:
+    enabled: true
+    ttl_seconds: 600
 
 admin:
   dashboard:
     enabled: true
     base_path: "/admin"
+    timestamp_format: "2006-01-02 15:04:05 MST"
+    timestamp_timezone: "Asia/Tokyo"
   auth:
     mode: "header"
     user_header: "X-Forwarded-User"
@@ -49,28 +58,34 @@ form:
       label: "Name"
       type: "text"
       required: true
+      max_length: 255
       rules: ["required"]
     - name: "email"
       label: "Email"
       type: "email"
       required: true
+      max_length: 320
       rules: ["required", "email"]
     - name: "tel"
       label: "Tel"
       type: "tel"
+      max_length: 32
       rules: ["jp_phone"]
     - name: "organization"
       label: "Organization"
       type: "text"
+      max_length: 255
     - name: "subject"
       label: "Subject"
       type: "text"
       required: true
+      max_length: 200
       rules: ["required"]
     - name: "message"
       label: "Message"
       type: "textarea"
       required: true
+      max_length: 4000
       rules: ["required", "message_length"]
 
 validation:

@@ -1,4 +1,6 @@
-# mx-api
+<p align="center">
+  <img src="docs/images/mx-api-go-logo-str.svg" alt="mx-api-go" width="420">
+</p>
 
 `mx-api` is a small Go service for validating contact-form payloads and sending HTML mail. The binary name is `mx-api`; the Go module is `github.com/michibiki-io/mx-api-go`.
 
@@ -108,6 +110,11 @@ The following environment variables are supported:
 - `BIND_PORT`
 - `MODE`
 - `ALLOWED_ORIGINS`
+- `MX_API_RATE_LIMIT_ENABLED`
+- `MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE`
+- `MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE`
+- `MX_API_IDEMPOTENCY_ENABLED`
+- `MX_API_IDEMPOTENCY_TTL_SECONDS`
 - `SMTP_SERVER_ADDR`
 - `SMTP_AUTHENTICATION_ENABLED`
 - `SMTP_SKIP_VERIFY_CERT`
@@ -124,6 +131,8 @@ The following environment variables are supported:
 - `MAIL_SUBMITTED_AT_FORMAT`
 - `MX_API_ADMIN_DASHBOARD_ENABLED`
 - `MX_API_ADMIN_BASE_PATH`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE`
 - `MX_API_ADMIN_AUTH_MODE`
 - `MX_API_ADMIN_AUTH_USER_HEADER`
 - `MX_API_ADMIN_AUTH_EMAIL_HEADER`
@@ -135,7 +144,11 @@ The following environment variables are supported:
 - `MX_API_AUDIT_SQLITE_PATH`
 - `MX_API_AUDIT_RETENTION_DAYS`
 
-Add form fields under `form.fields` and attach validation rules by name. Rules are defined under `validation` and use `go-playground/validator` tags, plus the built-in `jp_phone` rule.
+Add form fields under `form.fields` and attach validation rules by name. Rules are defined under `validation` and use `go-playground/validator` tags, plus the built-in `jp_phone` rule. Every field has a `max_length`; when omitted, `mx-api` fills a conservative default by field type and enforces it server-side.
+
+Public `POST` requests are protected by a lightweight in-memory rate limiter. It is intended as a last line of defense inside the service, not as a replacement for upstream protection. In multi-instance deployments, each instance keeps its own counters.
+
+`POST /api/v1/sendmail` supports `Idempotency-Key`. When the same key and the same payload are retried within `security.idempotency.ttl_seconds`, the service replays the successful response without sending another email. Static sites must generate and send a stable key for each form submission attempt to benefit from this behavior.
 
 SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SMTP_CLIENT_PASSWORD`; YAML values for those fields are ignored.
 
@@ -145,7 +158,13 @@ SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SM
 
 The dashboard is designed for operational visibility: administrators can scan request health from the top charts, inspect traffic trends, and then drill into individual audit events with filters and pagination.
 
+Dashboard view:
+
 ![mx-api admin dashboard](docs/images/admin-dashboard.png)
+
+Audit log view:
+
+![mx-api admin audit log](docs/images/admin-audit-log.png)
 
 Audit events are stored in SQLite when `audit.enabled` is true. The default embedded config uses `/var/lib/mx-api/audit.db`; persist that directory in containers or Kubernetes when audit history must survive restarts. `audit.retention_days` deletes older events at startup when the value is greater than zero.
 
@@ -154,6 +173,8 @@ admin:
   dashboard:
     enabled: true
     base_path: "/admin"
+    timestamp_format: "2006-01-02 15:04:05 MST"
+    timestamp_timezone: "Asia/Tokyo"
   auth:
     mode: "header"
     user_header: "X-Forwarded-User"
@@ -176,6 +197,8 @@ Authentication modes:
 - `none`: `mx-api` performs no dashboard authentication. The UI shows a visible warning banner. This mode must be protected by upstream access control such as ingress auth, reverse-proxy auth, oauth2-proxy, Authelia, VPN-only exposure, or Basic Auth. Do not expose it directly to the public internet.
 
 Audit logging intentionally avoids sensitive data. It records operational metadata such as timestamp, actor, action, method, path, endpoint, result, status code, request ID, duration, remote address, user agent summary, and high-level error code/message. It does not store Authorization headers, cookies, SMTP credentials, raw request bodies, submitted form contents, full mail body, full message text, or secret tokens.
+
+Audit log timestamps in the dashboard use Go time layouts. Set `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT` and optionally `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE` to change the display, for example `2006-01-02 15:04:05 MST` with `Asia/Tokyo`.
 
 The dashboard reset button opens a confirmation dialog. `POST /_admin/api/v1/audit-events/reset` requires `{"confirmation":"RESET"}`; existing audit events are deleted and a new `audit.reset` marker remains visible.
 
@@ -234,7 +257,7 @@ docker build -t mx-api .
 The Docker image builds and tests the Go binary during the build stage.
 It also builds the embedded Svelte admin dashboard before the Go binary is compiled.
 For container deployments that use SQLite audit storage, mount persistent storage at `/var/lib/mx-api`.
-Release automation computes the next version, creates the release tag from the merge commit, and injects the resolved version into the image build with the generic build args `BUILD_VERSION` and `BUILD_COMMIT`. This keeps the workflow reusable across repositories and avoids conflicts with branch protection rules.
+Release automation computes the next version, creates the release tag from the merge commit, and injects the resolved version into the image build with the generic build args `BUILD_VERSION` and `BUILD_COMMIT`. This keeps the workflow reusable across repositories and avoids conflicts with branch protection rules. The admin dashboard displays both values and links the commit hash to the matching GitHub commit when `BUILD_COMMIT` is available.
 
 You can optionally pass the version and commit hash into a local image build:
 
@@ -323,6 +346,11 @@ validation:
 - `BIND_PORT`
 - `MODE`
 - `ALLOWED_ORIGINS`
+- `MX_API_RATE_LIMIT_ENABLED`
+- `MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE`
+- `MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE`
+- `MX_API_IDEMPOTENCY_ENABLED`
+- `MX_API_IDEMPOTENCY_TTL_SECONDS`
 - `SMTP_SERVER_ADDR`
 - `SMTP_AUTHENTICATION_ENABLED`
 - `SMTP_SKIP_VERIFY_CERT`
@@ -339,6 +367,8 @@ validation:
 - `MAIL_SUBMITTED_AT_FORMAT`
 - `MX_API_ADMIN_DASHBOARD_ENABLED`
 - `MX_API_ADMIN_BASE_PATH`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT`
+- `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE`
 - `MX_API_ADMIN_AUTH_MODE`
 - `MX_API_ADMIN_AUTH_USER_HEADER`
 - `MX_API_ADMIN_AUTH_EMAIL_HEADER`
@@ -349,6 +379,12 @@ validation:
 - `MX_API_AUDIT_STORAGE_TYPE`
 - `MX_API_AUDIT_SQLITE_PATH`
 - `MX_API_AUDIT_RETENTION_DAYS`
+
+各 field には `max_length` があります。省略時は field type に応じた保守的な既定値を `mx-api` が補完し、server-side で必ず検証します。
+
+public `POST` request には軽量な in-memory rate limit が適用されます。これは service 内の最後の防御線であり、前段保護の代替ではありません。multi-instance 構成では instance ごとに counter を持ちます。
+
+`POST /api/v1/sendmail` は `Idempotency-Key` に対応しています。同じ key と同じ payload が `security.idempotency.ttl_seconds` 内に再送された場合、メールを再送せず成功レスポンスを再利用します。この効果を得るには、静的サイト側が form submission ごとに安定した key を生成して送信する必要があります。
 
 SMTP 認証情報は `SMTP_CLIENT_USERNAME` と `SMTP_CLIENT_PASSWORD` の環境変数からのみ取得します。YAML に `smtp.client_username` や `smtp.client_password` を書いても無視されます。
 
@@ -367,7 +403,13 @@ server:
 
 dashboard は運用状況を素早く確認するための画面です。上段の chart で request health を把握し、request trend を確認したうえで、filter と pagination を使って個別の audit event を調査できます。
 
+Dashboard view:
+
 ![mx-api admin dashboard](docs/images/admin-dashboard.png)
+
+Audit log view:
+
+![mx-api admin audit log](docs/images/admin-audit-log.png)
 
 `audit.enabled` が true の場合、監査ログは SQLite に保存されます。埋め込み config の保存先は `/var/lib/mx-api/audit.db` です。container / Kubernetes で監査履歴を restart 後も残す場合は、この directory を永続 volume として mount してください。`audit.retention_days` が 1 以上なら、起動時に指定日数より古い event を削除します。
 
@@ -376,6 +418,8 @@ admin:
   dashboard:
     enabled: true
     base_path: "/admin"
+    timestamp_format: "2006-01-02 15:04:05 MST"
+    timestamp_timezone: "Asia/Tokyo"
   auth:
     mode: "header"
     user_header: "X-Forwarded-User"
@@ -399,6 +443,8 @@ audit:
 
 監査ログは機密情報を保存しない設計です。記録するのは timestamp、actor、action、method、path、endpoint、result、status code、request ID、duration、remote address、user agent summary、高レベルな error code/message などの運用 metadata です。Authorization header、cookie、SMTP credential、raw request body、送信 form 全体、mail body、message text、secret token は保存しません。
 
+dashboard 上の audit log timestamp は Go の time layout で表示します。`MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT` と、必要に応じて `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE` を設定してください。例: `2006-01-02 15:04:05 MST` と `Asia/Tokyo`。
+
 dashboard の reset button は確認 dialog を開きます。`POST /_admin/api/v1/audit-events/reset` は `{"confirmation":"RESET"}` を要求し、既存の audit event を削除したうえで `audit.reset` marker を 1 件残します。
 
 ### Validation ルール
@@ -412,6 +458,7 @@ form:
       label: "Email"
       type: "email"
       required: true
+      max_length: 320
       rules: ["required", "email"]
 ```
 
@@ -497,3 +544,4 @@ docker build -t mx-api .
 ```
 
 Docker build stage では Go test と binary build を実行します。
+GitHub Actions では `BUILD_VERSION` と `BUILD_COMMIT` を Docker build に渡します。admin dashboard には version と commit hash が表示され、commit hash は GitHub commit への link になります。

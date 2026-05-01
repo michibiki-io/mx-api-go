@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Icon from '@iconify/svelte';
-  import { Alert, Badge, Button, Card, Modal } from 'flowbite-svelte';
+  import { Alert, Badge, Button, Modal } from 'flowbite-svelte';
   import { Doughnut, Line } from 'svelte-chartjs';
   import {
     ArcElement,
@@ -54,13 +54,17 @@
     { value: '1h', label: '1 hour' },
     { value: '6h', label: '6 hours' },
     { value: '24h', label: '24 hours' },
-    { value: '7d', label: '7 days' }
+    { value: '7d', label: '7 days' },
+    { value: '30d', label: '1 month' }
   ];
+
+  type ActiveView = 'dashboard' | 'audit';
 
   let me: AdminMe | null = null;
   let metrics: MetricsResponse | null = null;
   let auditOptions: AuditOptions = { actions: [], endpoints: [], results: [] };
   let page: AuditPage = { items: [], total: 0, nextCursor: null };
+  let activeView: ActiveView = 'dashboard';
   let selected: AuditEvent | null = null;
   let detailOpen = false;
   let resetOpen = false;
@@ -134,8 +138,11 @@
     }
   };
 
-  onMount(async () => {
-    await reloadAll();
+  onMount(() => {
+    syncViewFromHash();
+    window.addEventListener('hashchange', syncViewFromHash);
+    reloadAll();
+    return () => window.removeEventListener('hashchange', syncViewFromHash);
   });
 
   async function reloadAll() {
@@ -210,6 +217,33 @@
     return value ? new Date(value).toLocaleString() : '';
   }
 
+  function fmtEventTime(item: AuditEvent | null) {
+    if (!item) return '';
+    return item.timestampDisplay || fmtTime(item.timestamp);
+  }
+
+  function eventTarget(item: AuditEvent) {
+    return item.endpoint || item.path || '-';
+  }
+
+  function eventMessage(item: AuditEvent) {
+    return item.message || item.errorCode || '-';
+  }
+
+  function showDetail(item: AuditEvent) {
+    selected = item;
+    detailOpen = true;
+  }
+
+  function syncViewFromHash() {
+    activeView = window.location.hash === '#audit-log' ? 'audit' : 'dashboard';
+  }
+
+  function setView(view: ActiveView) {
+    activeView = view;
+    window.location.hash = view === 'audit' ? 'audit-log' : 'dashboard';
+  }
+
   function resetFilters() {
     filters = { ...filters, from: '', to: '', pageSize: '25', actor: '', action: '', endpoint: '', path: '', method: '', result: '', statusCode: '', requestId: '' };
   }
@@ -264,123 +298,160 @@
   }
 </script>
 
-<main class="min-h-screen bg-slate-50 text-slate-950">
-  <div class="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-    <header class="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-end md:justify-between">
-      <div>
-        <div class="flex items-center gap-2 text-sm font-medium text-blue-700">
-          <Icon icon="lets-icons:shield-done" class="h-5 w-5" />
-          <span>mx-api Admin</span>
+<main class="min-h-screen bg-slate-100 text-slate-950">
+  <div class="min-h-screen lg:flex">
+    <aside class="flex flex-col border-b border-slate-200 bg-white shadow-sm lg:fixed lg:inset-y-0 lg:w-64 lg:border-b-0 lg:border-r">
+      <div class="px-5 py-6">
+        <div class="flex w-fit items-start gap-1.5">
+          <img src="./mx-api-go-logo-str.svg" alt="mx-api-go" class="h-10 w-auto max-w-32 md:h-11" />
+          {#if me}
+            <span class="mt-1 whitespace-nowrap text-sm font-medium text-slate-700">{me.version}</span>
+          {/if}
         </div>
-        <h1 class="mt-1 text-2xl font-semibold tracking-normal text-slate-950">Audit Log Dashboard</h1>
       </div>
-      <div class="text-sm text-slate-600">
+
+      <nav class="flex gap-2 overflow-x-auto border-t border-slate-100 px-3 py-3 lg:flex-col lg:overflow-visible lg:border-t-0">
+        <button
+          class={`inline-flex min-w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${activeView === 'dashboard' ? 'bg-slate-100 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}
+          aria-current={activeView === 'dashboard' ? 'page' : undefined}
+          onclick={() => setView('dashboard')}
+        >
+          <Icon icon="lets-icons:chart" class="h-5 w-5" />
+          <span>Dashboard</span>
+        </button>
+        <button
+          class={`inline-flex min-w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${activeView === 'audit' ? 'bg-slate-100 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}
+          aria-current={activeView === 'audit' ? 'page' : undefined}
+          onclick={() => setView('audit')}
+        >
+          <Icon icon="lets-icons:order" class="h-5 w-5" />
+          <span>Audit Log</span>
+        </button>
+      </nav>
+
+      <div class="mt-auto hidden border-t border-slate-200 px-5 py-4 text-sm text-slate-600 lg:block">
         {#if me}
-          <span class="font-medium text-slate-900">{me.user}</span>
-          <span class="mx-2">/</span>
-          <span>{me.mode}</span>
-          <span class="mx-2">/</span>
-          <span>{me.version}</span>
+          {#if me.commitURL}
+            <a class="inline-flex max-w-full items-center gap-1.5 truncate text-slate-700 hover:text-blue-700 hover:underline" href={me.commitURL} target="_blank" rel="noreferrer">
+              <Icon icon="mdi:github" class="h-4 w-4 shrink-0" />
+              <span class="truncate">{me.shortCommit}</span>
+            </a>
+          {:else}
+            <span class="truncate">Commit {me.shortCommit}</span>
+          {/if}
         {/if}
       </div>
-    </header>
+    </aside>
 
-    {#if me?.authDisabled}
-      <Alert color="yellow">
-        <div class="flex items-center gap-2">
-          <Icon icon="lets-icons:warning" class="h-5 w-5" />
-          <span>Authentication is disabled. Protect this dashboard with an upstream access-control layer.</span>
-        </div>
-      </Alert>
-    {/if}
-
-    {#if error}
-      <Alert color="red">
-        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <span>{error}</span>
-          {#if recoverableAuthError}
-            <Button color="red" size="sm" onclick={refreshAuthentication}>Refresh authentication</Button>
+    <div class="flex min-h-screen flex-1 flex-col lg:pl-64">
+      <header class="sticky top-0 z-20 flex min-h-16 items-center justify-end border-b border-slate-200 bg-slate-100/95 px-4 backdrop-blur sm:px-6 lg:px-8">
+        <div class="flex flex-col items-end gap-1 text-sm text-slate-600">
+          {#if me}
+            <div>
+              <span class="font-medium text-slate-900">{me.user}</span>
+              <span class="mx-2">/</span>
+              <span>{me.mode}</span>
+            </div>
           {/if}
         </div>
-      </Alert>
-    {/if}
+      </header>
 
-    <section class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 class="text-sm font-semibold text-slate-700">Public API request result</h2>
-        <div class="mt-3 h-56">
-          {#if hasCounts(publicApiValues)}
-            <Doughnut data={publicApiData} options={doughnutOptions} />
+      <div class="flex-1 px-4 py-5 sm:px-6 lg:px-8">
+        <div class="mx-auto flex w-full max-w-7xl flex-col gap-5">
+          {#if me?.authDisabled}
+            <Alert color="yellow">
+              <div class="flex items-center gap-2">
+                <Icon icon="lets-icons:warning" class="h-5 w-5" />
+                <span>Authentication is disabled. Protect this dashboard with an upstream access-control layer.</span>
+              </div>
+            </Alert>
+          {/if}
+
+          {#if error}
+            <Alert color="red">
+              <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <span>{error}</span>
+                {#if recoverableAuthError}
+                  <Button color="red" size="sm" onclick={refreshAuthentication}>Refresh authentication</Button>
+                {/if}
+              </div>
+            </Alert>
+          {/if}
+
+          {#if activeView === 'dashboard'}
+            <section class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-700">Public API request result</h2>
+                <div class="mt-3 h-56">
+                  {#if hasCounts(publicApiValues)}
+                    <Doughnut data={publicApiData} options={doughnutOptions} />
+                  {:else}
+                    <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
+                  {/if}
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-700">Validation request result</h2>
+                <div class="mt-3 h-56">
+                  {#if hasCounts(validationValues)}
+                    <Doughnut data={validationData} options={doughnutOptions} />
+                  {:else}
+                    <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
+                  {/if}
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-700">Mail send result</h2>
+                <div class="mt-3 h-56">
+                  {#if hasCounts(mailValues)}
+                    <Doughnut data={mailData} options={doughnutOptions} />
+                  {:else}
+                    <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
+                  {/if}
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-700">Error status class</h2>
+                <div class="mt-3 h-56">
+                  {#if hasCounts(statusClassValues)}
+                    <Doughnut data={statusClassData} options={doughnutOptions} />
+                  {:else}
+                    <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
+                  {/if}
+                </div>
+              </div>
+            </section>
+
+            <section class="w-full rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 class="text-lg font-semibold">Request trend</h2>
+                  <p class="text-sm text-slate-500">Request volume over the selected time range</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  {#each ranges as range}
+                    <Button size="sm" color={filters.range === range.value ? 'blue' : 'alternative'} onclick={async () => { filters.range = range.value; await applyFilters(); }}>
+                      {range.label}
+                    </Button>
+                  {/each}
+                </div>
+              </div>
+              <div class="h-72">
+                {#if loading}
+                  <div class="flex h-full items-center justify-center text-sm text-slate-500">Loading chart</div>
+                {:else}
+                  <Line data={chartData} options={chartOptions} />
+                {/if}
+              </div>
+            </section>
           {:else}
-            <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
-          {/if}
-        </div>
-      </div>
-      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 class="text-sm font-semibold text-slate-700">Validation request result</h2>
-        <div class="mt-3 h-56">
-          {#if hasCounts(validationValues)}
-            <Doughnut data={validationData} options={doughnutOptions} />
-          {:else}
-            <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
-          {/if}
-        </div>
-      </div>
-      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 class="text-sm font-semibold text-slate-700">Mail send result</h2>
-        <div class="mt-3 h-56">
-          {#if hasCounts(mailValues)}
-            <Doughnut data={mailData} options={doughnutOptions} />
-          {:else}
-            <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
-          {/if}
-        </div>
-      </div>
-      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 class="text-sm font-semibold text-slate-700">Error status class</h2>
-        <div class="mt-3 h-56">
-          {#if hasCounts(statusClassValues)}
-            <Doughnut data={statusClassData} options={doughnutOptions} />
-          {:else}
-            <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
-          {/if}
-        </div>
-      </div>
-    </section>
-
-    <section class="w-full rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 class="text-lg font-semibold">Request trend</h2>
-          <p class="text-sm text-slate-500">Request volume over the selected time range</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          {#each ranges as range}
-            <Button size="sm" color={filters.range === range.value ? 'blue' : 'alternative'} onclick={async () => { filters.range = range.value; await applyFilters(); }}>
-              {range.label}
-            </Button>
-          {/each}
-        </div>
-      </div>
-      <div class="h-72">
-        {#if loading}
-          <div class="flex h-full items-center justify-center text-sm text-slate-500">Loading chart</div>
-        {:else}
-          <Line data={chartData} options={chartOptions} />
-        {/if}
-      </div>
-    </section>
-
-    <section class="w-full overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
-      <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-        <h2 class="text-base font-semibold">Audit log</h2>
-        <div class="flex flex-wrap justify-end gap-2">
-          <Button color="blue" onclick={applyFilters}>Apply</Button>
-          <Button color="alternative" onclick={reloadAll}>Refresh</Button>
-          <Button color="alternative" onclick={async () => { resetFilters(); await applyFilters(); }}>Clear filters</Button>
-          <Button color="red" onclick={openResetModal}>Reset</Button>
-        </div>
-      </div>
+            <section class="w-full overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
+              <div class="flex items-center justify-end border-b border-slate-200 px-5 py-4">
+                <div class="flex flex-wrap justify-end gap-2">
+                  <Button color="alternative" onclick={reloadAll}>Refresh</Button>
+                  <Button color="red" onclick={openResetModal}>Reset</Button>
+                </div>
+              </div>
 
       <div class="border-b border-slate-200 p-5">
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -425,53 +496,91 @@
           <Field label="Request ID"><input class="admin-input min-w-72" bind:value={filters.requestId} autocomplete="off" /></Field>
           <Field label="Path"><input class="admin-input min-w-72" bind:value={filters.path} placeholder="/api/v1" autocomplete="off" /></Field>
         </div>
+        <div class="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+          <Button color="blue" onclick={applyFilters}>Apply</Button>
+          <Button color="alternative" onclick={async () => { resetFilters(); await applyFilters(); }}>Clear filters</Button>
+        </div>
       </div>
 
       <div class="px-5 py-3 text-sm text-slate-500">{page.total} events match the current filters</div>
 
-      <div class="px-5">
+      <div class="hidden px-5 md:block">
         <div class="overflow-x-auto pb-3">
-          <table class="min-w-[1120px] w-full border-collapse text-left text-sm">
-            <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+          <table class="w-full min-w-[1040px] border-collapse border-t border-slate-300 text-left text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-600">
               <tr>
                 <th class="px-4 py-3 font-semibold">Timestamp</th>
                 <th class="px-4 py-3 font-semibold">Actor</th>
                 <th class="px-4 py-3 font-semibold">Action</th>
-                <th class="px-4 py-3 font-semibold">Method</th>
-                <th class="px-4 py-3 font-semibold">Path</th>
+                <th class="px-4 py-3 font-semibold">Target</th>
                 <th class="px-4 py-3 font-semibold">Result</th>
-                <th class="px-4 py-3 font-semibold">Status</th>
-                <th class="px-4 py-3 font-semibold">Request ID</th>
-                <th class="px-4 py-3 font-semibold">Duration</th>
+                <th class="px-4 py-3 font-semibold">Remote</th>
+                <th class="px-4 py-3 font-semibold">Message</th>
                 <th class="px-4 py-3 font-semibold"></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-200 text-slate-700">
               {#each page.items as item}
                 <tr class="hover:bg-slate-50">
-                  <td class="whitespace-nowrap px-4 py-3">{fmtTime(item.timestamp)}</td>
-                  <td class="px-4 py-3">{item.actor}</td>
-                  <td class="px-4 py-3">{item.action}</td>
-                  <td class="px-4 py-3">{item.method}</td>
-                  <td class="max-w-sm truncate px-4 py-3">{item.path}</td>
+                  <td class="whitespace-nowrap px-4 py-4 text-slate-900">{fmtEventTime(item)}</td>
+                  <td class="px-4 py-4 text-slate-900">{item.actor}</td>
+                  <td class="px-4 py-4">
+                    <Badge color="blue">{item.action}</Badge>
+                  </td>
+                  <td class="max-w-56 truncate px-4 py-4">{eventTarget(item)}</td>
                   <td class="px-4 py-3"><Badge color={resultColor(item.result)}>{item.result}</Badge></td>
-                  <td class="px-4 py-3">{item.statusCode || ''}</td>
-                  <td class="max-w-40 truncate px-4 py-3">{item.requestId}</td>
-                  <td class="whitespace-nowrap px-4 py-3">{item.durationMs} ms</td>
-                  <td class="px-4 py-3 text-right">
-                    <Button size="xs" color="alternative" onclick={() => { selected = item; detailOpen = true; }}>
+                  <td class="max-w-48 truncate px-4 py-4">{item.remoteAddr}</td>
+                  <td class="max-w-72 px-4 py-4 text-slate-900">{eventMessage(item)}</td>
+                  <td class="px-4 py-4 text-right">
+                    <Button size="xs" color="alternative" onclick={() => showDetail(item)}>
                       <Icon icon="lets-icons:view" class="h-4 w-4" />
+                      <span class="sr-only">Show details</span>
                     </Button>
                   </td>
                 </tr>
               {:else}
                 <tr>
-                  <td colspan={10} class="px-4 py-8 text-center text-slate-500">No audit events</td>
+                  <td colspan={8} class="px-4 py-8 text-center text-slate-500">No audit events</td>
                 </tr>
               {/each}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div class="space-y-4 px-4 pb-3 md:hidden">
+        {#each page.items as item}
+          <article class="rounded-lg border border-slate-300 bg-white p-4 shadow-sm">
+            <div class="text-sm font-medium text-slate-800">{fmtEventTime(item)}</div>
+            <div class="mt-2 text-sm font-semibold text-slate-950">{item.actor}</div>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <Badge color="blue">{item.action}</Badge>
+              <Badge color={resultColor(item.result)}>{item.result}</Badge>
+            </div>
+            <p class="mt-4 text-sm text-slate-950">{eventMessage(item)}</p>
+            <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div class="text-xs font-medium text-slate-500">Target</div>
+                <div class="mt-1 break-words text-slate-950">{eventTarget(item)}</div>
+              </div>
+              <div>
+                <div class="text-xs font-medium text-slate-500">Status</div>
+                <div class="mt-1 text-slate-950">{item.statusCode || '-'}</div>
+              </div>
+              <div>
+                <div class="text-xs font-medium text-slate-500">Remote</div>
+                <div class="mt-1 break-words text-slate-950">{item.remoteAddr || '-'}</div>
+              </div>
+              <div>
+                <div class="text-xs font-medium text-slate-500">Duration</div>
+                <div class="mt-1 text-slate-950">{item.durationMs} ms</div>
+              </div>
+            </div>
+            <Button class="mt-4" color="alternative" onclick={() => showDetail(item)}>Show details</Button>
+          </article>
+        {:else}
+          <div class="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">No audit events</div>
+        {/each}
       </div>
 
       <div class="flex items-center justify-between px-5 pb-5 pt-3 text-sm">
@@ -481,7 +590,11 @@
           <Button size="sm" color="alternative" disabled={page.nextCursor === null} onclick={() => loadAudit(page.nextCursor ?? offset)}>Next</Button>
         </div>
       </div>
-    </section>
+            </section>
+          {/if}
+        </div>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -489,7 +602,7 @@
   {#if selected}
     <div class="grid gap-3 text-sm sm:grid-cols-2">
       <Detail label="ID" value={selected.id} />
-      <Detail label="Timestamp" value={fmtTime(selected.timestamp)} />
+      <Detail label="Timestamp" value={fmtEventTime(selected)} />
       <Detail label="Actor" value={selected.actor} />
       <Detail label="Actor source" value={selected.actorSource} />
       <Detail label="Action" value={selected.action} />

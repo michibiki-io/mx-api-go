@@ -10,6 +10,7 @@ form:
     # Patch an existing field by name.
     - name: "subject"
       required: false
+      max_length: 200
       rules: []
 
 # Delete one validation rule by key.

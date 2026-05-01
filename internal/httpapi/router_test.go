@@ -23,9 +23,11 @@ import (
 type fakeSender struct {
 	message mail.Message
 	err     error
+	count   int
 }
 
 func (s *fakeSender) Send(_ context.Context, msg mail.Message) error {
+	s.count++
 	s.message = msg
 	return s.err
 }
@@ -172,6 +174,104 @@ func TestSendmailPostRendersTemplateAndSends(t *testing.T) {
 	}
 	if sender.message.Subject != "Question" {
 		t.Fatalf("subject = %q", sender.message.Subject)
+	}
+}
+
+func TestSendmailRejectsHeaderInjectionSubject(t *testing.T) {
+	sender := &fakeSender{}
+	router := testRouter(t, sender)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sendmail", bytes.NewBufferString(`{"name":"Jane","email":"jane@example.com","subject":"Question\nBcc: attacker@example.com","message":"Hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Referer", "http://localhost:5173/")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if sender.count != 0 {
+		t.Fatalf("sender count = %d, want 0", sender.count)
+	}
+	if !strings.Contains(rec.Body.String(), "validation_header_injection") {
+		t.Fatalf("header injection validation missing: %s", rec.Body.String())
+	}
+}
+
+func TestSendmailIdempotencyKeyReplaysSuccessWithoutSendingAgain(t *testing.T) {
+	sender := &fakeSender{}
+	router := testRouter(t, sender)
+
+	req := validRequest(http.MethodPost, "/api/v1/sendmail")
+	req.Header.Set("Idempotency-Key", "contact-submit-1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	replayReq := validRequest(http.MethodPost, "/api/v1/sendmail")
+	replayReq.Header.Set("Idempotency-Key", "contact-submit-1")
+	replayRec := httptest.NewRecorder()
+	router.ServeHTTP(replayRec, replayReq)
+	if replayRec.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, body = %s", replayRec.Code, replayRec.Body.String())
+	}
+	if sender.count != 1 {
+		t.Fatalf("sender count = %d, want 1", sender.count)
+	}
+}
+
+func TestSendmailIdempotencyKeyRejectsDifferentPayload(t *testing.T) {
+	sender := &fakeSender{}
+	router := testRouter(t, sender)
+
+	req := validRequest(http.MethodPost, "/api/v1/sendmail")
+	req.Header.Set("Idempotency-Key", "contact-submit-2")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	conflictReq := httptest.NewRequest(http.MethodPost, "/api/v1/sendmail", bytes.NewBufferString(`{"name":"Jane","email":"jane@example.com","tel":"090-1234-5678","subject":"Different","message":"Hello"}`))
+	conflictReq.Header.Set("Content-Type", "application/json")
+	conflictReq.Header.Set("Origin", "http://localhost:5173")
+	conflictReq.Header.Set("Referer", "http://localhost:5173/")
+	conflictReq.Header.Set("Idempotency-Key", "contact-submit-2")
+	conflictRec := httptest.NewRecorder()
+	router.ServeHTTP(conflictRec, conflictReq)
+	if conflictRec.Code != http.StatusConflict {
+		t.Fatalf("conflict status = %d, body = %s", conflictRec.Code, conflictRec.Body.String())
+	}
+	if sender.count != 1 {
+		t.Fatalf("sender count = %d, want 1", sender.count)
+	}
+}
+
+func TestPublicAPIRateLimitRejectsExcessRequests(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.RateLimit.RequestsPerMinute = 1
+	cfg.Security.RateLimit.FailureRequestsPerMinute = 0
+	cfg.Mail.TemplatePath = filepath.Join(t.TempDir(), "template.html")
+	if err := os.WriteFile(cfg.Mail.TemplatePath, []byte("Hello {{ name }}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	router := testRouterWithConfig(t, cfg, &fakeSender{})
+
+	first := validRequest(http.MethodPost, "/api/v1/validate")
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := validRequest(http.MethodPost, "/api/v1/validate")
+	secondRec := httptest.NewRecorder()
+	router.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, body = %s", secondRec.Code, secondRec.Body.String())
 	}
 }
 
@@ -332,6 +432,7 @@ func TestAdminHeaderAuthAllowAndDeny(t *testing.T) {
 func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.Mode = "none"
+	cfg.Admin.Dashboard.TimestampFormat = "2006/01/02 15:04 MST"
 	router, _ := testRouterWithAudit(t, cfg, &fakeSender{})
 	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -348,18 +449,27 @@ func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
 	if body["authDisabled"] != true {
 		t.Fatalf("authDisabled = %#v, want true", body["authDisabled"])
 	}
+	if body["auditTimestampFormat"] != "2006/01/02 15:04 MST" {
+		t.Fatalf("auditTimestampFormat = %#v", body["auditTimestampFormat"])
+	}
+	if body["commit"] == "" || body["shortCommit"] == "" {
+		t.Fatalf("commit fields missing: %#v", body)
+	}
 }
 
 func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.Mode = "none"
+	cfg.Admin.Dashboard.TimestampFormat = "2006-01-02 15:04:05 MST"
+	cfg.Admin.Dashboard.TimestampTimezone = "Asia/Tokyo"
 	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	base := time.Date(2026, 5, 1, 13, 24, 23, 0, time.UTC)
 	for i, event := range []audit.Event{
 		{Actor: "public", Action: "validation.request", Method: "POST", Path: "/api/v1/validate", StatusCode: 400, Result: audit.ResultFailure},
 		{Actor: "public", Action: "mail.send", Method: "POST", Path: "/api/v1/sendmail", StatusCode: 200, Result: audit.ResultSuccess},
 		{Actor: "public", Action: "mail.send", Method: "POST", Path: "/api/v1/sendmail", StatusCode: 400, Result: audit.ResultFailure},
 	} {
-		event.Timestamp = time.Now().UTC().Add(time.Duration(i) * time.Second)
+		event.Timestamp = base.Add(time.Duration(i) * time.Second)
 		if err := store.Record(context.Background(), event); err != nil {
 			t.Fatal(err)
 		}
@@ -373,14 +483,20 @@ func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		Items []audit.Event `json:"items"`
-		Total int           `json:"total"`
+		Items []struct {
+			audit.Event
+			TimestampDisplay string `json:"timestampDisplay"`
+		} `json:"items"`
+		Total int `json:"total"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal body: %v", err)
 	}
 	if body.Total != 2 || len(body.Items) != 1 {
 		t.Fatalf("body = %#v, want total 2 and one item", body)
+	}
+	if !strings.HasSuffix(body.Items[0].TimestampDisplay, "JST") {
+		t.Fatalf("timestampDisplay = %q, want JST suffix", body.Items[0].TimestampDisplay)
 	}
 }
 

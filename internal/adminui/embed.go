@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed dist/*
+//go:embed dist/* dist/assets/*
 var assets embed.FS
 
 func Register(root *gin.RouterGroup, basePath string, middleware ...gin.HandlerFunc) {

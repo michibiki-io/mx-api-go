@@ -5,6 +5,10 @@ export type AdminMe = {
   email: string;
   groups: string[];
   version: string;
+  commit: string;
+  shortCommit: string;
+  commitURL: string;
+  auditTimestampFormat: string;
 };
 
 export type Summary = {
@@ -35,6 +39,7 @@ export type MetricsResponse = {
 export type AuditEvent = {
   id: string;
   timestamp: string;
+  timestampDisplay?: string;
   actor: string;
   actorSource: string;
   action: string;
@@ -164,6 +169,7 @@ export function rangeMillis(range: string): number {
   if (range === '1h') return 60 * 60 * 1000;
   if (range === '6h') return 6 * 60 * 60 * 1000;
   if (range === '7d') return 7 * 24 * 60 * 60 * 1000;
+  if (range === '30d') return 30 * 24 * 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
 
