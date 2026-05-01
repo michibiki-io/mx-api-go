@@ -158,7 +158,13 @@ SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SM
 
 The dashboard is designed for operational visibility: administrators can scan request health from the top charts, inspect traffic trends, and then drill into individual audit events with filters and pagination.
 
+Dashboard view:
+
 ![mx-api admin dashboard](docs/images/admin-dashboard.png)
+
+Audit log view:
+
+![mx-api admin audit log](docs/images/admin-audit-log.png)
 
 Audit events are stored in SQLite when `audit.enabled` is true. The default embedded config uses `/var/lib/mx-api/audit.db`; persist that directory in containers or Kubernetes when audit history must survive restarts. `audit.retention_days` deletes older events at startup when the value is greater than zero.
 
@@ -397,7 +403,13 @@ server:
 
 dashboard は運用状況を素早く確認するための画面です。上段の chart で request health を把握し、request trend を確認したうえで、filter と pagination を使って個別の audit event を調査できます。
 
+Dashboard view:
+
 ![mx-api admin dashboard](docs/images/admin-dashboard.png)
+
+Audit log view:
+
+![mx-api admin audit log](docs/images/admin-audit-log.png)
 
 `audit.enabled` が true の場合、監査ログは SQLite に保存されます。埋め込み config の保存先は `/var/lib/mx-api/audit.db` です。container / Kubernetes で監査履歴を restart 後も残す場合は、この directory を永続 volume として mount してください。`audit.retention_days` が 1 以上なら、起動時に指定日数より古い event を削除します。
 
