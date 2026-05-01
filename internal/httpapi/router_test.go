@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/michibiki-io/mx-api-go/internal/audit"
 	"github.com/michibiki-io/mx-api-go/internal/config"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
 	"github.com/michibiki-io/mx-api-go/internal/requestvalidator"
@@ -48,6 +51,24 @@ func testRouterWithConfig(t *testing.T, cfg *config.Config, sender *fakeSender) 
 		t.Fatal(err)
 	}
 	return NewRouter(cfg, validatorEngine, sender, zap.NewNop())
+}
+
+func testRouterWithAudit(t *testing.T, cfg *config.Config, sender *fakeSender) (http.Handler, *audit.Store) {
+	t.Helper()
+	cfg.Mail.TemplatePath = filepath.Join(t.TempDir(), "template.html")
+	if err := os.WriteFile(cfg.Mail.TemplatePath, []byte("Hello {{ name }}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := audit.Open(context.Background(), filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	validatorEngine, err := requestvalidator.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewRouter(cfg, validatorEngine, sender, zap.NewNop(), store), store
 }
 
 func TestValidatePostKeepsLegacyErrorShape(t *testing.T) {
@@ -236,6 +257,186 @@ func TestMissingOriginIsUnauthorized(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuditLoggingRecordsPublicAPIWithoutSensitiveData(t *testing.T) {
+	cfg := config.Default()
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	req := validRequest(http.MethodPost, "/api/v1/sendmail")
+	req.Header.Set("Authorization", "Bearer secret-token")
+	req.Header.Set("Cookie", "session=secret")
+	req.Header.Set("X-Request-ID", "req-123")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	page, err := store.List(context.Background(), audit.Filter{Action: "mail.send", RequestID: "req-123"})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if page.Total != 1 {
+		t.Fatalf("mail send audit total = %d, want 1", page.Total)
+	}
+	raw, _ := json.Marshal(page.Items[0])
+	for _, forbidden := range []string{"secret-token", "session=secret", "Hello", "jane@example.com"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("audit event contains sensitive value %q: %s", forbidden, string(raw))
+		}
+	}
+}
+
+func TestAdminHeaderAuthAllowAndDeny(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.AllowedGroups = []string{"mx-api-admins"}
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+
+	deniedReq := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/me", nil)
+	deniedReq.Header.Set("X-Forwarded-User", "bob@example.com")
+	deniedReq.Header.Set("X-Forwarded-Groups", "users")
+	deniedRec := httptest.NewRecorder()
+	router.ServeHTTP(deniedRec, deniedReq)
+	if deniedRec.Code != http.StatusForbidden {
+		t.Fatalf("denied status = %d, body = %s", deniedRec.Code, deniedRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/me", nil)
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	req.Header.Set("X-Forwarded-Email", "alice@example.com")
+	req.Header.Set("X-Forwarded-Groups", "users, mx-api-admins")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["user"] != "alice@example.com" || body["mode"] != "header" {
+		t.Fatalf("unexpected me response: %#v", body)
+	}
+
+	page, err := store.List(context.Background(), audit.Filter{Action: "admin.access.denied"})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if page.Total != 1 {
+		t.Fatalf("denied audit total = %d, want 1", page.Total)
+	}
+}
+
+func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.Mode = "none"
+	router, _ := testRouterWithAudit(t, cfg, &fakeSender{})
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["authDisabled"] != true {
+		t.Fatalf("authDisabled = %#v, want true", body["authDisabled"])
+	}
+}
+
+func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.Mode = "none"
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	for i, event := range []audit.Event{
+		{Actor: "public", Action: "validation.request", Method: "POST", Path: "/api/v1/validate", StatusCode: 400, Result: audit.ResultFailure},
+		{Actor: "public", Action: "mail.send", Method: "POST", Path: "/api/v1/sendmail", StatusCode: 200, Result: audit.ResultSuccess},
+		{Actor: "public", Action: "mail.send", Method: "POST", Path: "/api/v1/sendmail", StatusCode: 400, Result: audit.ResultFailure},
+	} {
+		event.Timestamp = time.Now().UTC().Add(time.Duration(i) * time.Second)
+		if err := store.Record(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/audit-events?action=mail.send&limit=1&offset=1", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Items []audit.Event `json:"items"`
+		Total int           `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Total != 2 || len(body.Items) != 1 {
+		t.Fatalf("body = %#v, want total 2 and one item", body)
+	}
+}
+
+func TestAdminAuditResetClearsEventsAndLeavesMarker(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.Mode = "none"
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	if err := store.Record(context.Background(), audit.Event{Actor: "public", Action: "mail.send", StatusCode: 200, Result: audit.ResultSuccess}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/_admin/api/v1/audit-events/reset", strings.NewReader(`{"confirmation":"RESET","reason":"test reset"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	page, err := store.List(context.Background(), audit.Filter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Action != "audit.reset" {
+		t.Fatalf("page after reset = %#v", page)
+	}
+}
+
+func TestAdminRequestMetricsAggregates(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.Mode = "none"
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	for _, event := range []audit.Event{
+		{Timestamp: base.Add(10 * time.Minute), Action: "validation.request", StatusCode: 400, Result: audit.ResultFailure},
+		{Timestamp: base.Add(20 * time.Minute), Action: "mail.send", StatusCode: 200, Result: audit.ResultSuccess},
+	} {
+		if err := store.Record(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	url := "/_admin/api/v1/request-metrics?from=" + base.Format(time.RFC3339Nano) + "&to=" + base.Add(time.Hour).Format(time.RFC3339Nano) + "&bucket=1h"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body audit.Metrics
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Summary.Total != 2 || body.Summary.ValidationFailures != 1 {
+		t.Fatalf("metrics summary = %#v", body.Summary)
 	}
 }
 

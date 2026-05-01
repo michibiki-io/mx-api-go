@@ -7,6 +7,26 @@ security:
     - "www.example.com"
     - "localhost:5173"
 
+admin:
+  dashboard:
+    enabled: true
+    base_path: "/admin"
+  auth:
+    mode: "header"
+    user_header: "X-Forwarded-User"
+    email_header: "X-Forwarded-Email"
+    groups_header: "X-Forwarded-Groups"
+    allowed_users: []
+    allowed_groups:
+      - "mx-api-admins"
+
+audit:
+  enabled: true
+  storage:
+    type: "sqlite"
+    path: "/var/lib/mx-api/audit.db"
+  retention_days: 90
+
 smtp:
   server_addr: "smtp.example.com:465"
   authentication_enabled: true

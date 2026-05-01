@@ -8,10 +8,19 @@ services:
       - ./dev/.env
     environment:
       MX_API_CONFIG: /etc/mx-api/configs/config.yaml
+      CONTEXT_PATH: /contact
+      MX_API_ADMIN_DASHBOARD_ENABLED: "true"
+      MX_API_ADMIN_BASE_PATH: /admin
+      # Local docker-compose is for development. Protect real deployments with
+      # header auth or an upstream access-control layer.
+      MX_API_ADMIN_AUTH_MODE: none
+      MX_API_AUDIT_ENABLED: "true"
+      MX_API_AUDIT_SQLITE_PATH: /var/lib/mx-api/audit.db
     ports:
       - "8080:8080"
     volumes:
       - ./configs:/etc/mx-api/configs:ro
+      - mx-api-data:/var/lib/mx-api
 
   frontend:
     image: nginx:1.29-alpine
@@ -21,3 +30,6 @@ services:
       - "5173:80"
     volumes:
       - ./dev/frontend:/usr/share/nginx/html:ro
+
+volumes:
+  mx-api-data:

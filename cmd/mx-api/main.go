@@ -10,6 +10,7 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"github.com/michibiki-io/mx-api-go/internal/audit"
 	"github.com/michibiki-io/mx-api-go/internal/config"
 	"github.com/michibiki-io/mx-api-go/internal/httpapi"
 	"github.com/michibiki-io/mx-api-go/internal/logging"
@@ -36,7 +37,30 @@ func main() {
 		logger.Fatal("failed to initialize validator", zap.Error(err))
 	}
 
-	router := httpapi.NewRouter(cfg, validatorEngine, mail.NewSMTPSender(cfg), logger)
+	var auditRecorder audit.Recorder = audit.NoopRecorder{}
+	if cfg.Audit.Enabled {
+		if cfg.Audit.Storage.Type != "sqlite" {
+			logger.Fatal("unsupported audit storage type", zap.String("type", cfg.Audit.Storage.Type))
+		}
+		store, err := audit.Open(context.Background(), cfg.Audit.Storage.Path)
+		if err != nil {
+			logger.Fatal("failed to initialize audit store", zap.Error(err))
+		}
+		defer store.Close()
+		auditRecorder = store
+		if err := store.PruneRetention(context.Background(), cfg.Audit.RetentionDays); err != nil {
+			logger.Warn("failed to prune audit logs", zap.Error(err))
+		}
+		_ = store.Record(context.Background(), audit.Event{
+			Actor:       "system",
+			ActorSource: "system",
+			Action:      "system.startup",
+			Result:      audit.ResultSuccess,
+			Message:     "mx-api started",
+		})
+	}
+
+	router := httpapi.NewRouter(cfg, validatorEngine, mail.NewSMTPSender(cfg), logger, auditRecorder)
 	server := &http.Server{
 		Addr:              cfg.Server.Address(),
 		Handler:           router,
