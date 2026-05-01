@@ -23,9 +23,11 @@ import (
 type fakeSender struct {
 	message mail.Message
 	err     error
+	count   int
 }
 
 func (s *fakeSender) Send(_ context.Context, msg mail.Message) error {
+	s.count++
 	s.message = msg
 	return s.err
 }
@@ -172,6 +174,104 @@ func TestSendmailPostRendersTemplateAndSends(t *testing.T) {
 	}
 	if sender.message.Subject != "Question" {
 		t.Fatalf("subject = %q", sender.message.Subject)
+	}
+}
+
+func TestSendmailRejectsHeaderInjectionSubject(t *testing.T) {
+	sender := &fakeSender{}
+	router := testRouter(t, sender)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sendmail", bytes.NewBufferString(`{"name":"Jane","email":"jane@example.com","subject":"Question\nBcc: attacker@example.com","message":"Hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Referer", "http://localhost:5173/")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if sender.count != 0 {
+		t.Fatalf("sender count = %d, want 0", sender.count)
+	}
+	if !strings.Contains(rec.Body.String(), "validation_header_injection") {
+		t.Fatalf("header injection validation missing: %s", rec.Body.String())
+	}
+}
+
+func TestSendmailIdempotencyKeyReplaysSuccessWithoutSendingAgain(t *testing.T) {
+	sender := &fakeSender{}
+	router := testRouter(t, sender)
+
+	req := validRequest(http.MethodPost, "/api/v1/sendmail")
+	req.Header.Set("Idempotency-Key", "contact-submit-1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	replayReq := validRequest(http.MethodPost, "/api/v1/sendmail")
+	replayReq.Header.Set("Idempotency-Key", "contact-submit-1")
+	replayRec := httptest.NewRecorder()
+	router.ServeHTTP(replayRec, replayReq)
+	if replayRec.Code != http.StatusOK {
+		t.Fatalf("replay status = %d, body = %s", replayRec.Code, replayRec.Body.String())
+	}
+	if sender.count != 1 {
+		t.Fatalf("sender count = %d, want 1", sender.count)
+	}
+}
+
+func TestSendmailIdempotencyKeyRejectsDifferentPayload(t *testing.T) {
+	sender := &fakeSender{}
+	router := testRouter(t, sender)
+
+	req := validRequest(http.MethodPost, "/api/v1/sendmail")
+	req.Header.Set("Idempotency-Key", "contact-submit-2")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	conflictReq := httptest.NewRequest(http.MethodPost, "/api/v1/sendmail", bytes.NewBufferString(`{"name":"Jane","email":"jane@example.com","tel":"090-1234-5678","subject":"Different","message":"Hello"}`))
+	conflictReq.Header.Set("Content-Type", "application/json")
+	conflictReq.Header.Set("Origin", "http://localhost:5173")
+	conflictReq.Header.Set("Referer", "http://localhost:5173/")
+	conflictReq.Header.Set("Idempotency-Key", "contact-submit-2")
+	conflictRec := httptest.NewRecorder()
+	router.ServeHTTP(conflictRec, conflictReq)
+	if conflictRec.Code != http.StatusConflict {
+		t.Fatalf("conflict status = %d, body = %s", conflictRec.Code, conflictRec.Body.String())
+	}
+	if sender.count != 1 {
+		t.Fatalf("sender count = %d, want 1", sender.count)
+	}
+}
+
+func TestPublicAPIRateLimitRejectsExcessRequests(t *testing.T) {
+	cfg := config.Default()
+	cfg.Security.RateLimit.RequestsPerMinute = 1
+	cfg.Security.RateLimit.FailureRequestsPerMinute = 0
+	cfg.Mail.TemplatePath = filepath.Join(t.TempDir(), "template.html")
+	if err := os.WriteFile(cfg.Mail.TemplatePath, []byte("Hello {{ name }}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	router := testRouterWithConfig(t, cfg, &fakeSender{})
+
+	first := validRequest(http.MethodPost, "/api/v1/validate")
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := validRequest(http.MethodPost, "/api/v1/validate")
+	secondRec := httptest.NewRecorder()
+	router.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, body = %s", secondRec.Code, secondRec.Body.String())
 	}
 }
 

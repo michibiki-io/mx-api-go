@@ -71,6 +71,25 @@ func (h *Handler) sendmailPost(c *gin.Context) {
 	if subject == "" {
 		subject = h.cfg.Mail.Subject
 	}
+	if containsMailHeaderLineBreak(subject) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "BadRequest",
+			"errors": map[string]any{
+				"subject": map[string]string{
+					"code":    "validation_header_injection",
+					"message": "must not contain line breaks",
+				},
+			},
+		})
+		c.Abort()
+		return
+	}
+
+	idempotencyKey, ok := h.startIdempotency(c, values)
+	if !ok {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.cfg.SMTP.Timeout)
 	defer cancel()
 	if err := h.mailer.Send(ctx, mail.Message{
@@ -84,11 +103,18 @@ func (h *Handler) sendmailPost(c *gin.Context) {
 			"status": "BadRequest",
 			"errors": fmt.Sprintf("An internal error occurred, please try later or send us an email at %s.", h.cfg.Mail.InternalErrorRecipient),
 		})
+		if idempotencyKey != "" {
+			h.idempotency.Forget(idempotencyKey)
+		}
 		c.Abort()
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "Ok", "version": version.Value()})
+	response := gin.H{"status": "Ok", "version": version.Value()}
+	if idempotencyKey != "" {
+		h.idempotency.Complete(idempotencyKey, http.StatusOK, response)
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) schema(c *gin.Context) {
@@ -171,6 +197,10 @@ func htmlLineBreaks(value string) string {
 	escaped = strings.ReplaceAll(escaped, "\r\n", "\n")
 	escaped = strings.ReplaceAll(escaped, "\r", "\n")
 	return strings.ReplaceAll(escaped, "\n", "<br>")
+}
+
+func containsMailHeaderLineBreak(value string) bool {
+	return strings.ContainsAny(value, "\r\n")
 }
 
 func stringify(value any) string {

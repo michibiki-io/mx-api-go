@@ -23,9 +23,17 @@ func (h *Handler) allowedOrigin(c *gin.Context) {
 		return
 	}
 
-	c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-	c.Writer.Header().Set("Access-Control-Allow-Headers", "X-Firebase-AppCheck, X-Turnstile-AppCheck, Content-Type")
+	h.setPublicCORS(c)
 	c.Next()
+}
+
+func (h *Handler) setPublicCORS(c *gin.Context) {
+	origin := c.Request.Header.Get("Origin")
+	if origin == "" || !h.isAllowedOrigin(origin) {
+		return
+	}
+	c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "X-Firebase-AppCheck, X-Turnstile-AppCheck, X-Request-ID, Idempotency-Key, Content-Type")
 }
 
 func (h *Handler) setSchemaCORS(c *gin.Context) {

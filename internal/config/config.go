@@ -43,7 +43,20 @@ func (c ServerConfig) Address() string {
 }
 
 type SecurityConfig struct {
-	AllowedOrigins []string `yaml:"allowed_origins" json:"allowedOrigins"`
+	AllowedOrigins []string          `yaml:"allowed_origins" json:"allowedOrigins"`
+	RateLimit      RateLimitConfig   `yaml:"rate_limit" json:"rateLimit"`
+	Idempotency    IdempotencyConfig `yaml:"idempotency" json:"idempotency"`
+}
+
+type RateLimitConfig struct {
+	Enabled                  bool `yaml:"enabled" json:"enabled"`
+	RequestsPerMinute        int  `yaml:"requests_per_minute" json:"requestsPerMinute"`
+	FailureRequestsPerMinute int  `yaml:"failure_requests_per_minute" json:"failureRequestsPerMinute"`
+}
+
+type IdempotencyConfig struct {
+	Enabled    bool `yaml:"enabled" json:"enabled"`
+	TTLSeconds int  `yaml:"ttl_seconds" json:"ttlSeconds"`
 }
 
 type AdminConfig struct {
@@ -108,6 +121,7 @@ type FieldConfig struct {
 	Label       string   `yaml:"label" json:"label"`
 	Type        string   `yaml:"type" json:"type"`
 	Required    bool     `yaml:"required" json:"required"`
+	MaxLength   int      `yaml:"max_length" json:"maxLength"`
 	Default     string   `yaml:"default" json:"default"`
 	Placeholder string   `yaml:"placeholder" json:"placeholder"`
 	Help        string   `yaml:"help" json:"help"`
@@ -173,6 +187,15 @@ func Default() *Config {
 		},
 		Security: SecurityConfig{
 			AllowedOrigins: []string{"127.0.0.1", "localhost", "localhost:5173"},
+			RateLimit: RateLimitConfig{
+				Enabled:                  true,
+				RequestsPerMinute:        60,
+				FailureRequestsPerMinute: 20,
+			},
+			Idempotency: IdempotencyConfig{
+				Enabled:    true,
+				TTLSeconds: 600,
+			},
 		},
 		Admin: AdminConfig{
 			Dashboard: AdminDashboardConfig{
@@ -213,12 +236,12 @@ func Default() *Config {
 			Extra:                  map[string]string{},
 		},
 		Form: FormConfig{Fields: []FieldConfig{
-			{Name: "name", Label: "Name", Type: "text", Required: true, Rules: []string{"required"}},
-			{Name: "email", Label: "Email", Type: "email", Required: true, Rules: []string{"required", "email"}},
-			{Name: "tel", Label: "Tel", Type: "tel", Rules: []string{"jp_phone"}},
-			{Name: "organization", Label: "Organization", Type: "text"},
-			{Name: "subject", Label: "Subject", Type: "text"},
-			{Name: "message", Label: "Message", Type: "textarea", Required: true, Rules: []string{"required"}},
+			{Name: "name", Label: "Name", Type: "text", Required: true, MaxLength: 255, Rules: []string{"required"}},
+			{Name: "email", Label: "Email", Type: "email", Required: true, MaxLength: 320, Rules: []string{"required", "email"}},
+			{Name: "tel", Label: "Tel", Type: "tel", MaxLength: 32, Rules: []string{"jp_phone"}},
+			{Name: "organization", Label: "Organization", Type: "text", MaxLength: 255},
+			{Name: "subject", Label: "Subject", Type: "text", MaxLength: 200},
+			{Name: "message", Label: "Message", Type: "textarea", Required: true, MaxLength: 4000, Rules: []string{"required"}},
 		}},
 		Validation: map[string]ValidationRule{
 			"required": {Tag: "required", Code: "validation_required", Message: "cannot be blank"},
@@ -459,6 +482,11 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
 		cfg.Security.AllowedOrigins = splitCSV(v)
 	}
+	setBool(&cfg.Security.RateLimit.Enabled, "MX_API_RATE_LIMIT_ENABLED")
+	setInt(&cfg.Security.RateLimit.RequestsPerMinute, "MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE")
+	setInt(&cfg.Security.RateLimit.FailureRequestsPerMinute, "MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE")
+	setBool(&cfg.Security.Idempotency.Enabled, "MX_API_IDEMPOTENCY_ENABLED")
+	setInt(&cfg.Security.Idempotency.TTLSeconds, "MX_API_IDEMPOTENCY_TTL_SECONDS")
 
 	setBool(&cfg.Admin.Dashboard.Enabled, "MX_API_ADMIN_DASHBOARD_ENABLED")
 	setString(&cfg.Admin.Dashboard.BasePath, "MX_API_ADMIN_BASE_PATH")
@@ -547,6 +575,15 @@ func normalize(cfg *Config) {
 	if cfg.SMTP.Timeout == 0 {
 		cfg.SMTP.Timeout = 10 * time.Second
 	}
+	if cfg.Security.RateLimit.RequestsPerMinute < 0 {
+		cfg.Security.RateLimit.RequestsPerMinute = 0
+	}
+	if cfg.Security.RateLimit.FailureRequestsPerMinute < 0 {
+		cfg.Security.RateLimit.FailureRequestsPerMinute = 0
+	}
+	if cfg.Security.Idempotency.TTLSeconds <= 0 {
+		cfg.Security.Idempotency.TTLSeconds = 600
+	}
 	if cfg.Mail.TemplatePath != "" && !filepath.IsAbs(cfg.Mail.TemplatePath) {
 		cfg.Mail.TemplatePath = filepath.Clean(cfg.Mail.TemplatePath)
 	}
@@ -568,9 +605,27 @@ func normalize(cfg *Config) {
 		if field.Type == "" {
 			field.Type = "text"
 		}
+		if field.MaxLength <= 0 {
+			field.MaxLength = defaultFieldMaxLength(*field)
+		}
 		if field.Required && !slices.Contains(field.Rules, "required") {
 			field.Rules = append([]string{"required"}, field.Rules...)
 		}
+	}
+}
+
+func defaultFieldMaxLength(field FieldConfig) int {
+	switch {
+	case strings.EqualFold(field.Name, "subject"):
+		return 200
+	case strings.EqualFold(field.Type, "textarea"):
+		return 4000
+	case strings.EqualFold(field.Type, "email"):
+		return 320
+	case strings.EqualFold(field.Type, "tel"):
+		return 32
+	default:
+		return 255
 	}
 }
 

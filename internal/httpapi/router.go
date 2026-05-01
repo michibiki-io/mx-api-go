@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michibiki-io/mx-api-go/internal/adminui"
@@ -16,12 +17,15 @@ import (
 )
 
 type Handler struct {
-	cfg       *config.Config
-	validator *requestvalidator.Engine
-	mailer    mail.Sender
-	logger    *zap.Logger
-	audit     audit.Recorder
-	auditRead auditReader
+	cfg                *config.Config
+	validator          *requestvalidator.Engine
+	mailer             mail.Sender
+	logger             *zap.Logger
+	audit              audit.Recorder
+	auditRead          auditReader
+	rateLimiter        *fixedWindowLimiter
+	failureRateLimiter *fixedWindowLimiter
+	idempotency        *idempotencyStore
 }
 
 type auditReader interface {
@@ -44,7 +48,16 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 	if len(recorders) > 0 && recorders[0] != nil {
 		recorder = recorders[0]
 	}
-	handler := &Handler{cfg: cfg, validator: validator, mailer: sender, logger: logger, audit: recorder}
+	handler := &Handler{
+		cfg:                cfg,
+		validator:          validator,
+		mailer:             sender,
+		logger:             logger,
+		audit:              recorder,
+		rateLimiter:        newFixedWindowLimiter(rateLimitWindow),
+		failureRateLimiter: newFixedWindowLimiter(rateLimitWindow),
+		idempotency:        newIdempotencyStore(time.Duration(cfg.Security.Idempotency.TTLSeconds) * time.Second),
+	}
 	if reader, ok := recorder.(auditReader); ok {
 		handler.auditRead = reader
 	}
@@ -61,6 +74,7 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 
 	api := root.Group("/api/v1")
 	api.Use(handler.auditPublicAPI())
+	api.Use(handler.rateLimitPublicAPI())
 	{
 		api.GET("/schema", handler.schema)
 		api.GET("/form-schema", handler.schema)

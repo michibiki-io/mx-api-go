@@ -64,6 +64,9 @@ validation:
 	if len(cfg.Form.Fields) != 1 || cfg.Form.Fields[0].Name != "company" {
 		t.Fatalf("fields were not loaded: %#v", cfg.Form.Fields)
 	}
+	if cfg.Form.Fields[0].MaxLength != 255 {
+		t.Fatalf("field MaxLength = %d, want default 255", cfg.Form.Fields[0].MaxLength)
+	}
 	if cfg.Mail.Timezone != "Asia/Tokyo" {
 		t.Fatalf("Mail.Timezone = %q, want Asia/Tokyo", cfg.Mail.Timezone)
 	}
@@ -258,6 +261,11 @@ func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	t.Setenv("MX_API_AUDIT_STORAGE_TYPE", "sqlite")
 	t.Setenv("MX_API_AUDIT_SQLITE_PATH", "/tmp/test-audit.db")
 	t.Setenv("MX_API_AUDIT_RETENTION_DAYS", "7")
+	t.Setenv("MX_API_RATE_LIMIT_ENABLED", "false")
+	t.Setenv("MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE", "11")
+	t.Setenv("MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE", "3")
+	t.Setenv("MX_API_IDEMPOTENCY_ENABLED", "false")
+	t.Setenv("MX_API_IDEMPOTENCY_TTL_SECONDS", "120")
 
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
@@ -280,6 +288,12 @@ func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	}
 	if cfg.Audit.Enabled || cfg.Audit.Storage.Path != "/tmp/test-audit.db" || cfg.Audit.RetentionDays != 7 {
 		t.Fatalf("audit env not applied: %#v", cfg.Audit)
+	}
+	if cfg.Security.RateLimit.Enabled || cfg.Security.RateLimit.RequestsPerMinute != 11 || cfg.Security.RateLimit.FailureRequestsPerMinute != 3 {
+		t.Fatalf("rate limit env not applied: %#v", cfg.Security.RateLimit)
+	}
+	if cfg.Security.Idempotency.Enabled || cfg.Security.Idempotency.TTLSeconds != 120 {
+		t.Fatalf("idempotency env not applied: %#v", cfg.Security.Idempotency)
 	}
 }
 

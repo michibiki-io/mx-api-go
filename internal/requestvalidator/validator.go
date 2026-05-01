@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	playground "github.com/go-playground/validator/v10"
 	"github.com/michibiki-io/mx-api-go/internal/config"
@@ -52,6 +53,20 @@ func (e *Engine) Validate(values map[string]string) map[string]FieldError {
 	errors := map[string]FieldError{}
 	for _, field := range e.cfg.Form.Fields {
 		value := strings.TrimSpace(values[field.Name])
+		if field.MaxLength > 0 && utf8.RuneCountInString(value) > field.MaxLength {
+			errors[field.Name] = FieldError{
+				Code:    "validation_max_length",
+				Message: fmt.Sprintf("must be %d characters or less", field.MaxLength),
+			}
+			continue
+		}
+		if isHeaderField(field) && containsHeaderLineBreak(value) {
+			errors[field.Name] = FieldError{
+				Code:    "validation_header_injection",
+				Message: "must not contain line breaks",
+			}
+			continue
+		}
 		for _, ruleName := range field.Rules {
 			rule, ok := e.cfg.Validation[ruleName]
 			if !ok {
@@ -77,6 +92,14 @@ func (e *Engine) Validate(values map[string]string) map[string]FieldError {
 		}
 	}
 	return errors
+}
+
+func isHeaderField(field config.FieldConfig) bool {
+	return strings.EqualFold(field.Name, "subject")
+}
+
+func containsHeaderLineBreak(value string) bool {
+	return strings.ContainsAny(value, "\r\n")
 }
 
 func validateJPPhone(fl playground.FieldLevel) bool {

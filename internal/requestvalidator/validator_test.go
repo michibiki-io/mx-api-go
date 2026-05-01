@@ -58,6 +58,42 @@ func TestValidateConfiguredRule(t *testing.T) {
 	}
 }
 
+func TestValidateFieldMaxLength(t *testing.T) {
+	cfg := config.Default()
+	cfg.Form.Fields = []config.FieldConfig{
+		{Name: "message", Type: "textarea", MaxLength: 5},
+	}
+
+	engine, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errors := engine.Validate(map[string]string{"message": "123456"})
+
+	if errors["message"].Code != "validation_max_length" {
+		t.Fatalf("message error = %#v", errors["message"])
+	}
+}
+
+func TestValidateSubjectRejectsHeaderLineBreaks(t *testing.T) {
+	cfg := config.Default()
+	engine, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	errors := engine.Validate(map[string]string{
+		"name":    "Jane",
+		"email":   "jane@example.com",
+		"subject": "Hello\r\nBcc: attacker@example.com",
+		"message": "hello",
+	})
+
+	if errors["subject"].Code != "validation_header_injection" {
+		t.Fatalf("subject error = %#v", errors["subject"])
+	}
+}
+
 func TestValidateJPPhone(t *testing.T) {
 	cfg := config.Default()
 	engine, err := New(cfg)

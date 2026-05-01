@@ -72,6 +72,60 @@ func TestSMTPSenderReportsDataCloseError(t *testing.T) {
 	}
 }
 
+func TestPrepareMessageRejectsUnsafeHeaders(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  Message
+	}{
+		{
+			name: "subject",
+			msg: Message{
+				From:       "from@example.com",
+				Recipients: []string{"to@example.com"},
+				Subject:    "Subject\r\nBcc: attacker@example.com",
+			},
+		},
+		{
+			name: "from",
+			msg: Message{
+				From:       "from@example.com\r\nBcc: attacker@example.com",
+				Recipients: []string{"to@example.com"},
+				Subject:    "Subject",
+			},
+		},
+		{
+			name: "recipient",
+			msg: Message{
+				From:       "from@example.com",
+				Recipients: []string{"to@example.com\nBcc: attacker@example.com"},
+				Subject:    "Subject",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := prepareMessage(tt.msg); err == nil {
+				t.Fatal("prepareMessage() error = nil, want unsafe header error")
+			}
+		})
+	}
+}
+
+func TestPrepareMessageAcceptsDisplayAddresses(t *testing.T) {
+	prepared, err := prepareMessage(Message{
+		From:       "Example <from@example.com>",
+		Recipients: []string{"Contact <to@example.com>"},
+		Subject:    "Subject",
+	})
+	if err != nil {
+		t.Fatalf("prepareMessage() error = %v", err)
+	}
+	if prepared.From.Address != "from@example.com" || prepared.Recipients[0].Address != "to@example.com" {
+		t.Fatalf("prepared addresses = %#v %#v", prepared.From, prepared.Recipients[0])
+	}
+}
+
 func startSMTPTestServer(t *testing.T, dataResponse string) (string, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

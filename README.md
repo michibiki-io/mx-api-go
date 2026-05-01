@@ -108,6 +108,11 @@ The following environment variables are supported:
 - `BIND_PORT`
 - `MODE`
 - `ALLOWED_ORIGINS`
+- `MX_API_RATE_LIMIT_ENABLED`
+- `MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE`
+- `MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE`
+- `MX_API_IDEMPOTENCY_ENABLED`
+- `MX_API_IDEMPOTENCY_TTL_SECONDS`
 - `SMTP_SERVER_ADDR`
 - `SMTP_AUTHENTICATION_ENABLED`
 - `SMTP_SKIP_VERIFY_CERT`
@@ -135,7 +140,11 @@ The following environment variables are supported:
 - `MX_API_AUDIT_SQLITE_PATH`
 - `MX_API_AUDIT_RETENTION_DAYS`
 
-Add form fields under `form.fields` and attach validation rules by name. Rules are defined under `validation` and use `go-playground/validator` tags, plus the built-in `jp_phone` rule.
+Add form fields under `form.fields` and attach validation rules by name. Rules are defined under `validation` and use `go-playground/validator` tags, plus the built-in `jp_phone` rule. Every field has a `max_length`; when omitted, `mx-api` fills a conservative default by field type and enforces it server-side.
+
+Public `POST` requests are protected by a lightweight in-memory rate limiter. It is intended as a last line of defense inside the service, not as a replacement for upstream protection. In multi-instance deployments, each instance keeps its own counters.
+
+`POST /api/v1/sendmail` supports `Idempotency-Key`. When the same key and the same payload are retried within `security.idempotency.ttl_seconds`, the service replays the successful response without sending another email. Static sites must generate and send a stable key for each form submission attempt to benefit from this behavior.
 
 SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SMTP_CLIENT_PASSWORD`; YAML values for those fields are ignored.
 
@@ -323,6 +332,11 @@ validation:
 - `BIND_PORT`
 - `MODE`
 - `ALLOWED_ORIGINS`
+- `MX_API_RATE_LIMIT_ENABLED`
+- `MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE`
+- `MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE`
+- `MX_API_IDEMPOTENCY_ENABLED`
+- `MX_API_IDEMPOTENCY_TTL_SECONDS`
 - `SMTP_SERVER_ADDR`
 - `SMTP_AUTHENTICATION_ENABLED`
 - `SMTP_SKIP_VERIFY_CERT`
@@ -349,6 +363,12 @@ validation:
 - `MX_API_AUDIT_STORAGE_TYPE`
 - `MX_API_AUDIT_SQLITE_PATH`
 - `MX_API_AUDIT_RETENTION_DAYS`
+
+各 field には `max_length` があります。省略時は field type に応じた保守的な既定値を `mx-api` が補完し、server-side で必ず検証します。
+
+public `POST` request には軽量な in-memory rate limit が適用されます。これは service 内の最後の防御線であり、前段保護の代替ではありません。multi-instance 構成では instance ごとに counter を持ちます。
+
+`POST /api/v1/sendmail` は `Idempotency-Key` に対応しています。同じ key と同じ payload が `security.idempotency.ttl_seconds` 内に再送された場合、メールを再送せず成功レスポンスを再利用します。この効果を得るには、静的サイト側が form submission ごとに安定した key を生成して送信する必要があります。
 
 SMTP 認証情報は `SMTP_CLIENT_USERNAME` と `SMTP_CLIENT_PASSWORD` の環境変数からのみ取得します。YAML に `smtp.client_username` や `smtp.client_password` を書いても無視されます。
 
@@ -412,6 +432,7 @@ form:
       label: "Email"
       type: "email"
       required: true
+      max_length: 320
       rules: ["required", "email"]
 ```
 

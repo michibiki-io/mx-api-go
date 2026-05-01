@@ -10,7 +10,7 @@ import (
 	"io/fs"
 	"mime"
 	"net"
-	"net/mail"
+	netmail "net/mail"
 	"net/smtp"
 	"os"
 	"path/filepath"
@@ -32,6 +32,13 @@ var defaultTemplates embed.FS
 type Message struct {
 	From       string
 	Recipients []string
+	Subject    string
+	Body       string
+}
+
+type preparedMessage struct {
+	From       *netmail.Address
+	Recipients []*netmail.Address
 	Subject    string
 	Body       string
 }
@@ -96,6 +103,10 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	if s.cfg.SMTP.ServerAddr == "" {
 		return fmt.Errorf("smtp server address is empty")
 	}
+	prepared, err := prepareMessage(msg)
+	if err != nil {
+		return err
+	}
 	host, _, err := net.SplitHostPort(s.cfg.SMTP.ServerAddr)
 	if err != nil {
 		return fmt.Errorf("invalid smtp server address %q: %w", s.cfg.SMTP.ServerAddr, err)
@@ -129,12 +140,12 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		}
 	}
 
-	if err := client.Mail(msg.From); err != nil {
+	if err := client.Mail(prepared.From.Address); err != nil {
 		return fmt.Errorf("smtp MAIL: %w", err)
 	}
-	for _, recipient := range msg.Recipients {
-		if err := client.Rcpt(recipient); err != nil {
-			return fmt.Errorf("smtp RCPT %q: %w", recipient, err)
+	for _, recipient := range prepared.Recipients {
+		if err := client.Rcpt(recipient.Address); err != nil {
+			return fmt.Errorf("smtp RCPT %q: %w", recipient.Address, err)
 		}
 	}
 
@@ -143,7 +154,7 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		return fmt.Errorf("smtp DATA: %w", err)
 	}
 
-	if _, err := writer.Write(buildMIMEMessage(msg)); err != nil {
+	if _, err := writer.Write(buildMIMEMessage(prepared)); err != nil {
 		_ = writer.Close()
 		return fmt.Errorf("write smtp body: %w", err)
 	}
@@ -151,6 +162,49 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		return fmt.Errorf("finish smtp DATA: %w", err)
 	}
 	return nil
+}
+
+func prepareMessage(msg Message) (preparedMessage, error) {
+	if containsHeaderLineBreak(msg.Subject) {
+		return preparedMessage{}, fmt.Errorf("unsafe subject header")
+	}
+	from, err := parseHeaderAddress("from", msg.From)
+	if err != nil {
+		return preparedMessage{}, err
+	}
+	if len(msg.Recipients) == 0 {
+		return preparedMessage{}, fmt.Errorf("recipient list is empty")
+	}
+	recipients := make([]*netmail.Address, 0, len(msg.Recipients))
+	for _, recipient := range msg.Recipients {
+		parsed, err := parseHeaderAddress("recipient", recipient)
+		if err != nil {
+			return preparedMessage{}, err
+		}
+		recipients = append(recipients, parsed)
+	}
+	return preparedMessage{
+		From:       from,
+		Recipients: recipients,
+		Subject:    strings.TrimSpace(msg.Subject),
+		Body:       msg.Body,
+	}, nil
+}
+
+func parseHeaderAddress(label, value string) (*netmail.Address, error) {
+	value = strings.TrimSpace(value)
+	if containsHeaderLineBreak(value) {
+		return nil, fmt.Errorf("unsafe %s header", label)
+	}
+	parsed, err := netmail.ParseAddress(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s address %q: %w", label, value, err)
+	}
+	return parsed, nil
+}
+
+func containsHeaderLineBreak(value string) bool {
+	return strings.ContainsAny(value, "\r\n")
 }
 
 func (s *SMTPSender) dial(ctx context.Context, host string) (net.Conn, error) {
@@ -184,14 +238,14 @@ func (s *SMTPSender) tlsConfig(host string) *tls.Config {
 	}
 }
 
-func buildMIMEMessage(msg Message) []byte {
+func buildMIMEMessage(msg preparedMessage) []byte {
 	var buf bytes.Buffer
-	from := msg.From
-	if parsed, err := mail.ParseAddress(msg.From); err == nil {
-		from = parsed.String()
+	recipients := make([]string, 0, len(msg.Recipients))
+	for _, recipient := range msg.Recipients {
+		recipients = append(recipients, recipient.String())
 	}
-	buf.WriteString("From: " + from + "\r\n")
-	buf.WriteString("To: " + strings.Join(msg.Recipients, ", ") + "\r\n")
+	buf.WriteString("From: " + msg.From.String() + "\r\n")
+	buf.WriteString("To: " + strings.Join(recipients, ", ") + "\r\n")
 	buf.WriteString("Subject: " + mime.QEncoding.Encode("UTF-8", msg.Subject) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
 	buf.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
