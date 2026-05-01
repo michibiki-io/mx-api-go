@@ -21,6 +21,8 @@ const (
 type Config struct {
 	Server     ServerConfig              `yaml:"server" json:"server"`
 	Security   SecurityConfig            `yaml:"security" json:"security"`
+	Admin      AdminConfig               `yaml:"admin" json:"admin"`
+	Audit      AuditConfig               `yaml:"audit" json:"audit"`
 	SMTP       SMTPConfig                `yaml:"smtp" json:"-"`
 	Mail       MailConfig                `yaml:"mail" json:"mail"`
 	Form       FormConfig                `yaml:"form" json:"form"`
@@ -42,6 +44,36 @@ func (c ServerConfig) Address() string {
 
 type SecurityConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins" json:"allowedOrigins"`
+}
+
+type AdminConfig struct {
+	Dashboard AdminDashboardConfig `yaml:"dashboard" json:"dashboard"`
+	Auth      AdminAuthConfig      `yaml:"auth" json:"auth"`
+}
+
+type AdminDashboardConfig struct {
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	BasePath string `yaml:"base_path" json:"basePath"`
+}
+
+type AdminAuthConfig struct {
+	Mode          string   `yaml:"mode" json:"mode"`
+	UserHeader    string   `yaml:"user_header" json:"userHeader"`
+	EmailHeader   string   `yaml:"email_header" json:"emailHeader"`
+	GroupsHeader  string   `yaml:"groups_header" json:"groupsHeader"`
+	AllowedUsers  []string `yaml:"allowed_users" json:"allowedUsers"`
+	AllowedGroups []string `yaml:"allowed_groups" json:"allowedGroups"`
+}
+
+type AuditConfig struct {
+	Enabled       bool               `yaml:"enabled" json:"enabled"`
+	Storage       AuditStorageConfig `yaml:"storage" json:"storage"`
+	RetentionDays int                `yaml:"retention_days" json:"retentionDays"`
+}
+
+type AuditStorageConfig struct {
+	Type string `yaml:"type" json:"type"`
+	Path string `yaml:"path" json:"path"`
 }
 
 type SMTPConfig struct {
@@ -141,6 +173,27 @@ func Default() *Config {
 		},
 		Security: SecurityConfig{
 			AllowedOrigins: []string{"127.0.0.1", "localhost", "localhost:5173"},
+		},
+		Admin: AdminConfig{
+			Dashboard: AdminDashboardConfig{
+				Enabled:  true,
+				BasePath: "/admin",
+			},
+			Auth: AdminAuthConfig{
+				Mode:          "header",
+				UserHeader:    "X-Forwarded-User",
+				EmailHeader:   "X-Forwarded-Email",
+				GroupsHeader:  "X-Forwarded-Groups",
+				AllowedGroups: []string{"mx-api-admins"},
+			},
+		},
+		Audit: AuditConfig{
+			Enabled: true,
+			Storage: AuditStorageConfig{
+				Type: "sqlite",
+				Path: "/tmp/mx-api-audit.db",
+			},
+			RetentionDays: 90,
 		},
 		SMTP: SMTPConfig{
 			AuthenticationEnabled: true,
@@ -407,6 +460,24 @@ func applyEnv(cfg *Config) {
 		cfg.Security.AllowedOrigins = splitCSV(v)
 	}
 
+	setBool(&cfg.Admin.Dashboard.Enabled, "MX_API_ADMIN_DASHBOARD_ENABLED")
+	setString(&cfg.Admin.Dashboard.BasePath, "MX_API_ADMIN_BASE_PATH")
+	setString(&cfg.Admin.Auth.Mode, "MX_API_ADMIN_AUTH_MODE")
+	setString(&cfg.Admin.Auth.UserHeader, "MX_API_ADMIN_AUTH_USER_HEADER")
+	setString(&cfg.Admin.Auth.EmailHeader, "MX_API_ADMIN_AUTH_EMAIL_HEADER")
+	setString(&cfg.Admin.Auth.GroupsHeader, "MX_API_ADMIN_AUTH_GROUPS_HEADER")
+	if v := os.Getenv("MX_API_ADMIN_ALLOWED_USERS"); v != "" {
+		cfg.Admin.Auth.AllowedUsers = splitCSV(v)
+	}
+	if v := os.Getenv("MX_API_ADMIN_ALLOWED_GROUPS"); v != "" {
+		cfg.Admin.Auth.AllowedGroups = splitCSV(v)
+	}
+
+	setBool(&cfg.Audit.Enabled, "MX_API_AUDIT_ENABLED")
+	setString(&cfg.Audit.Storage.Type, "MX_API_AUDIT_STORAGE_TYPE")
+	setString(&cfg.Audit.Storage.Path, "MX_API_AUDIT_SQLITE_PATH")
+	setInt(&cfg.Audit.RetentionDays, "MX_API_AUDIT_RETENTION_DAYS")
+
 	setString(&cfg.SMTP.ServerAddr, "SMTP_SERVER_ADDR")
 	setBool(&cfg.SMTP.AuthenticationEnabled, "SMTP_AUTHENTICATION_ENABLED")
 	setBool(&cfg.SMTP.SkipVerifyCert, "SMTP_SKIP_VERIFY_CERT")
@@ -443,6 +514,32 @@ func normalize(cfg *Config) {
 	}
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
+	}
+	cfg.Admin.Dashboard.BasePath = normalizePath(cfg.Admin.Dashboard.BasePath, "/admin")
+	cfg.Admin.Auth.Mode = strings.ToLower(strings.TrimSpace(cfg.Admin.Auth.Mode))
+	if cfg.Admin.Auth.Mode == "" {
+		cfg.Admin.Auth.Mode = "header"
+	}
+	if cfg.Admin.Auth.UserHeader == "" {
+		cfg.Admin.Auth.UserHeader = "X-Forwarded-User"
+	}
+	if cfg.Admin.Auth.EmailHeader == "" {
+		cfg.Admin.Auth.EmailHeader = "X-Forwarded-Email"
+	}
+	if cfg.Admin.Auth.GroupsHeader == "" {
+		cfg.Admin.Auth.GroupsHeader = "X-Forwarded-Groups"
+	}
+	cfg.Admin.Auth.AllowedUsers = cleanList(cfg.Admin.Auth.AllowedUsers)
+	cfg.Admin.Auth.AllowedGroups = cleanList(cfg.Admin.Auth.AllowedGroups)
+	cfg.Audit.Storage.Type = strings.ToLower(strings.TrimSpace(cfg.Audit.Storage.Type))
+	if cfg.Audit.Storage.Type == "" {
+		cfg.Audit.Storage.Type = "sqlite"
+	}
+	if cfg.Audit.Storage.Path == "" {
+		cfg.Audit.Storage.Path = "/tmp/mx-api-audit.db"
+	}
+	if cfg.Audit.RetentionDays < 0 {
+		cfg.Audit.RetentionDays = 0
 	}
 	if cfg.SMTP.TLSMode == "" {
 		cfg.SMTP.TLSMode = "implicit"
@@ -501,6 +598,28 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func cleanList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func normalizePath(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	if value == "/" {
+		return "/"
+	}
+	return "/" + strings.Trim(value, "/")
 }
 
 func setString(target *string, key string) {

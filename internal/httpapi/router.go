@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michibiki-io/mx-api-go/internal/adminui"
+	"github.com/michibiki-io/mx-api-go/internal/audit"
 	"github.com/michibiki-io/mx-api-go/internal/config"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
 	"github.com/michibiki-io/mx-api-go/internal/requestvalidator"
@@ -17,16 +20,34 @@ type Handler struct {
 	validator *requestvalidator.Engine
 	mailer    mail.Sender
 	logger    *zap.Logger
+	audit     audit.Recorder
+	auditRead auditReader
 }
 
-func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender mail.Sender, logger *zap.Logger) http.Handler {
+type auditReader interface {
+	audit.Recorder
+	List(context.Context, audit.Filter) (audit.Page, error)
+	Get(context.Context, string) (audit.Event, bool, error)
+	Summary(context.Context, audit.Filter) (audit.Summary, error)
+	Metrics(context.Context, audit.MetricsFilter) (audit.Metrics, error)
+	Reset(context.Context, audit.Event) error
+}
+
+func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender mail.Sender, logger *zap.Logger, recorders ...audit.Recorder) http.Handler {
 	if strings.EqualFold(cfg.Server.Mode, "debug") {
 		gin.SetMode(gin.DebugMode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	handler := &Handler{cfg: cfg, validator: validator, mailer: sender, logger: logger}
+	recorder := audit.Recorder(audit.NoopRecorder{})
+	if len(recorders) > 0 && recorders[0] != nil {
+		recorder = recorders[0]
+	}
+	handler := &Handler{cfg: cfg, validator: validator, mailer: sender, logger: logger, audit: recorder}
+	if reader, ok := recorder.(auditReader); ok {
+		handler.auditRead = reader
+	}
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	_ = engine.SetTrustedProxies(nil)
@@ -39,6 +60,7 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 	}
 
 	api := root.Group("/api/v1")
+	api.Use(handler.auditPublicAPI())
 	{
 		api.GET("/schema", handler.schema)
 		api.GET("/form-schema", handler.schema)
@@ -52,6 +74,20 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 		sendmail.OPTIONS("", optionStatus)
 		sendmail.GET("", status("Ok"))
 		sendmail.POST("", handler.validatePost, handler.sendmailPost)
+	}
+
+	if cfg.Admin.Dashboard.Enabled {
+		adminAPI := root.Group("/_admin/api/v1")
+		adminAPI.Use(handler.adminRequired())
+		{
+			adminAPI.GET("/me", handler.adminMe)
+			adminAPI.GET("/request-metrics", handler.adminRequestMetrics)
+			adminAPI.GET("/audit-options", handler.adminAuditOptions)
+			adminAPI.GET("/audit-events", handler.adminAuditEvents)
+			adminAPI.GET("/audit-events/:id", handler.adminAuditEvent)
+			adminAPI.POST("/audit-events/reset", handler.adminAuditReset)
+		}
+		adminui.Register(root, cfg.Admin.Dashboard.BasePath, handler.adminRequired(), handler.adminDashboardAccess())
 	}
 
 	return engine

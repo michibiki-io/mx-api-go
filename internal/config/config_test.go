@@ -245,6 +245,44 @@ smtp:
 	}
 }
 
+func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
+	t.Setenv("MX_API_ADMIN_DASHBOARD_ENABLED", "false")
+	t.Setenv("MX_API_ADMIN_BASE_PATH", "ops")
+	t.Setenv("MX_API_ADMIN_AUTH_MODE", "none")
+	t.Setenv("MX_API_ADMIN_AUTH_USER_HEADER", "Remote-User")
+	t.Setenv("MX_API_ADMIN_AUTH_EMAIL_HEADER", "Remote-Email")
+	t.Setenv("MX_API_ADMIN_AUTH_GROUPS_HEADER", "Remote-Groups")
+	t.Setenv("MX_API_ADMIN_ALLOWED_USERS", "alice@example.com,bob@example.com")
+	t.Setenv("MX_API_ADMIN_ALLOWED_GROUPS", "admins, operators")
+	t.Setenv("MX_API_AUDIT_ENABLED", "false")
+	t.Setenv("MX_API_AUDIT_STORAGE_TYPE", "sqlite")
+	t.Setenv("MX_API_AUDIT_SQLITE_PATH", "/tmp/test-audit.db")
+	t.Setenv("MX_API_AUDIT_RETENTION_DAYS", "7")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Admin.Dashboard.Enabled {
+		t.Fatal("admin dashboard should be disabled from env")
+	}
+	if cfg.Admin.Dashboard.BasePath != "/ops" {
+		t.Fatalf("BasePath = %q, want /ops", cfg.Admin.Dashboard.BasePath)
+	}
+	if cfg.Admin.Auth.Mode != "none" || cfg.Admin.Auth.UserHeader != "Remote-User" || cfg.Admin.Auth.EmailHeader != "Remote-Email" || cfg.Admin.Auth.GroupsHeader != "Remote-Groups" {
+		t.Fatalf("admin auth env not applied: %#v", cfg.Admin.Auth)
+	}
+	if len(cfg.Admin.Auth.AllowedUsers) != 2 || cfg.Admin.Auth.AllowedUsers[0] != "alice@example.com" {
+		t.Fatalf("AllowedUsers = %#v", cfg.Admin.Auth.AllowedUsers)
+	}
+	if len(cfg.Admin.Auth.AllowedGroups) != 2 || cfg.Admin.Auth.AllowedGroups[1] != "operators" {
+		t.Fatalf("AllowedGroups = %#v", cfg.Admin.Auth.AllowedGroups)
+	}
+	if cfg.Audit.Enabled || cfg.Audit.Storage.Path != "/tmp/test-audit.db" || cfg.Audit.RetentionDays != 7 {
+		t.Fatalf("audit env not applied: %#v", cfg.Audit)
+	}
+}
+
 func fieldByName(fields []FieldConfig, name string) (FieldConfig, bool) {
 	for _, field := range fields {
 		if field.Name == name {

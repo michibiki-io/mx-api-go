@@ -1,0 +1,216 @@
+package httpapi
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/michibiki-io/mx-api-go/internal/audit"
+	"github.com/michibiki-io/mx-api-go/internal/version"
+)
+
+func (h *Handler) adminMe(c *gin.Context) {
+	identity := currentAdminIdentity(c)
+	c.JSON(http.StatusOK, gin.H{
+		"mode":         h.cfg.Admin.Auth.Mode,
+		"authDisabled": identity.AuthDisabled,
+		"user":         identity.User,
+		"email":        identity.Email,
+		"groups":       identity.Groups,
+		"version":      version.Value(),
+	})
+}
+
+func (h *Handler) adminRequestMetrics(c *gin.Context) {
+	if h.auditRead == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audit storage is not available"})
+		return
+	}
+	filter := audit.MetricsFilter{
+		From:        queryTime(c, "from"),
+		To:          queryTime(c, "to"),
+		Bucket:      queryDuration(c, "bucket"),
+		Endpoint:    c.Query("endpoint"),
+		Method:      c.Query("method"),
+		Result:      c.Query("result"),
+		StatusClass: c.Query("status_class"),
+	}
+	metrics, err := h.auditRead.Metrics(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load request metrics"})
+		return
+	}
+	h.recordAdminAPI(c, "admin.metrics.view", "Admin viewed request metrics")
+	c.JSON(http.StatusOK, metrics)
+}
+
+func (h *Handler) adminAuditOptions(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"actions": audit.KnownActions(),
+		"endpoints": []string{
+			"/api/v1/schema",
+			"/api/v1/form-schema",
+			"/api/v1/validate",
+			"/api/v1/sendmail",
+			"/_admin/api/v1/me",
+			"/_admin/api/v1/request-metrics",
+			"/_admin/api/v1/audit-events",
+		},
+		"results": []string{audit.ResultSuccess, audit.ResultFailure, audit.ResultDenied},
+	})
+}
+
+func (h *Handler) adminAuditEvents(c *gin.Context) {
+	if h.auditRead == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audit storage is not available"})
+		return
+	}
+	filter := audit.Filter{
+		From:        queryTime(c, "from"),
+		To:          queryTime(c, "to"),
+		Actor:       c.Query("actor"),
+		Action:      c.Query("action"),
+		Endpoint:    c.Query("endpoint"),
+		Path:        c.Query("path"),
+		Method:      c.Query("method"),
+		Result:      c.Query("result"),
+		StatusCode:  queryInt(c, "status_code", 0),
+		StatusClass: c.Query("status_class"),
+		RequestID:   c.Query("request_id"),
+		Limit:       queryInt(c, "limit", 50),
+		Offset:      queryInt(c, "offset", 0),
+	}
+	page, err := h.auditRead.List(c.Request.Context(), filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load audit events"})
+		return
+	}
+	nextOffset := filter.Offset + filter.Limit
+	var nextCursor *int
+	if nextOffset < page.Total {
+		nextCursor = &nextOffset
+	}
+	h.recordAdminAPI(c, "audit.view", "Admin viewed audit logs")
+	c.JSON(http.StatusOK, gin.H{
+		"items":      page.Items,
+		"total":      page.Total,
+		"nextCursor": nextCursor,
+	})
+}
+
+func (h *Handler) adminAuditEvent(c *gin.Context) {
+	if h.auditRead == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audit storage is not available"})
+		return
+	}
+	event, ok, err := h.auditRead.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load audit event"})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "audit event not found"})
+		return
+	}
+	h.recordAdminAPI(c, "audit.detail.view", "Admin viewed audit log detail")
+	c.JSON(http.StatusOK, event)
+}
+
+func (h *Handler) adminAuditReset(c *gin.Context) {
+	if h.auditRead == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audit storage is not available"})
+		return
+	}
+	var body struct {
+		Confirmation string `json:"confirmation"`
+		Reason       string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reset request"})
+		return
+	}
+	if body.Confirmation != "RESET" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "confirmation must be RESET"})
+		return
+	}
+	identity := currentAdminIdentity(c)
+	marker := audit.Event{
+		Actor:       identity.User,
+		ActorSource: "admin:" + identity.AuthMode,
+		Action:      "audit.reset",
+		Method:      c.Request.Method,
+		Path:        c.Request.URL.Path,
+		Endpoint:    c.FullPath(),
+		StatusCode:  http.StatusOK,
+		Result:      audit.ResultSuccess,
+		RemoteAddr:  clientAddress(c),
+		UserAgent:   c.Request.UserAgent(),
+		RequestID:   requestID(c),
+		Message:     "Admin reset audit log",
+		Metadata: map[string]any{
+			"reason": strings.TrimSpace(body.Reason),
+		},
+	}
+	if err := h.auditRead.Reset(c.Request.Context(), marker); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset audit events"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *Handler) recordAdminAPI(c *gin.Context, action, message string) {
+	identity := currentAdminIdentity(c)
+	h.recordAudit(c.Request.Context(), audit.Event{
+		Actor:       identity.User,
+		ActorSource: "admin:" + identity.AuthMode,
+		Action:      action,
+		Method:      c.Request.Method,
+		Path:        c.Request.URL.Path,
+		Endpoint:    c.FullPath(),
+		StatusCode:  c.Writer.Status(),
+		Result:      audit.ResultSuccess,
+		RemoteAddr:  clientAddress(c),
+		UserAgent:   c.Request.UserAgent(),
+		RequestID:   requestID(c),
+		Message:     message,
+	})
+}
+
+func queryInt(c *gin.Context, key string, fallback int) int {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func queryTime(c *gin.Context, key string) time.Time {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse("2006-01-02", value); err == nil {
+		return parsed
+	}
+	return time.Time{}
+}
+
+func queryDuration(c *gin.Context, key string) time.Duration {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return 0
+	}
+	if parsed, err := time.ParseDuration(value); err == nil {
+		return parsed
+	}
+	return 0
+}

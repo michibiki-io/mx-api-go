@@ -2,6 +2,9 @@
 
 !go.mod
 !go.sum
+!frontend/**
+frontend/node_modules
+frontend/.svelte-kit
 !cmd/**
 !internal/**
 !configs/config.example.yaml
