@@ -72,6 +72,48 @@ func TestSMTPSenderReportsDataCloseError(t *testing.T) {
 	}
 }
 
+func TestSMTPSenderCheckPlainServer(t *testing.T) {
+	addr, stop := startSMTPTestServer(t, "250 OK")
+	defer stop()
+
+	sender := NewSMTPSender(&config.Config{
+		SMTP: config.SMTPConfig{
+			ServerAddr: addr,
+			TLSMode:    "plain",
+			Timeout:    time.Second,
+		},
+	})
+
+	result := sender.Check(context.Background())
+	if result.Code != "" {
+		t.Fatalf("Check() code = %q, message = %q", result.Code, result.Message)
+	}
+	if !result.Reachable {
+		t.Fatal("Check() reachable = false, want true")
+	}
+	if result.AuthenticationEnabled || result.Authenticated {
+		t.Fatalf("Check() auth flags = enabled:%t authenticated:%t, want false false", result.AuthenticationEnabled, result.Authenticated)
+	}
+	if result.TLSActive {
+		t.Fatal("Check() TLSActive = true, want false")
+	}
+	if result.CheckedAt.IsZero() {
+		t.Fatal("Check() checkedAt is zero")
+	}
+}
+
+func TestSMTPSenderCheckInvalidConfig(t *testing.T) {
+	sender := NewSMTPSender(&config.Config{})
+
+	result := sender.Check(context.Background())
+	if result.Code != "invalid_config" {
+		t.Fatalf("Check() code = %q, want invalid_config", result.Code)
+	}
+	if result.Reachable {
+		t.Fatal("Check() reachable = true, want false")
+	}
+}
+
 func TestPrepareMessageRejectsUnsafeHeaders(t *testing.T) {
 	tests := []struct {
 		name string

@@ -16,7 +16,7 @@
     TimeScale,
     Tooltip
   } from 'chart.js';
-  import type { AuditEvent, AuditFilters, AuditOptions, AuditPage, AdminMe, MetricsResponse, Summary } from './api';
+  import type { AuditEvent, AuditFilters, AuditOptions, AuditPage, AdminMe, MailServerCheck, MailServerCheckResponse, MetricsResponse, Summary } from './api';
   import { ApiError, apiGet, apiGetWithAuthRecovery, apiPost, auditParams, isTransientAuthStatus, rangeToParams } from './api';
   import Detail from './components/Detail.svelte';
   import Field from './components/Field.svelte';
@@ -59,6 +59,8 @@
   ];
 
   type ActiveView = 'dashboard' | 'audit';
+  type MailServerState = 'disabled' | 'checking' | 'unknown' | 'error' | 'ok';
+  type MailServerBadgeColor = 'green' | 'red' | 'yellow' | 'blue';
 
   let me: AdminMe | null = null;
   let metrics: MetricsResponse | null = null;
@@ -71,6 +73,9 @@
   let resetConfirmation = '';
   let resetReason = '';
   let resetting = false;
+  let mailServerCheck: MailServerCheck | null = null;
+  let mailServerChecking = false;
+  let mailServerError = '';
   let loading = true;
   let error = '';
   let recoverableAuthError = false;
@@ -100,6 +105,9 @@
   $: validationData = doughnutData(['validation success', 'validation failure'], validationValues, ['#0f766e', '#ea580c']);
   $: mailData = doughnutData(['mail send success', 'mail send failure'], mailValues, ['#2563eb', '#f97316']);
   $: statusClassData = doughnutData(['4xx', '5xx'], statusClassValues, ['#f59e0b', '#7f1d1d']);
+  $: mailServerStateValue = mailServerState(me?.authDisabled, mailServerChecking, mailServerCheck);
+  $: mailServerBadgeColorValue = mailServerBadgeColor(mailServerStateValue);
+  $: mailServerStatusLabelValue = mailServerStatusLabel(mailServerStateValue);
   $: chartData = {
     labels: metrics?.points.map((point) => new Date(point.timestamp).toLocaleString()) ?? [],
     datasets: [
@@ -154,6 +162,9 @@
       auditOptions = await apiGetWithAuthRecovery<AuditOptions>('/audit-options');
       await loadMetrics(true);
       await loadAudit(0, true);
+      if (!me.authDisabled) {
+        void loadMailServerCheck();
+      }
     } catch (err) {
       if (isRecoverableAuthError(err)) {
         recoverableAuthError = true;
@@ -190,6 +201,24 @@
       await loadAudit(0);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to apply filters';
+    }
+  }
+
+  async function loadMailServerCheck() {
+    mailServerChecking = true;
+    mailServerError = '';
+    try {
+      const response = await apiPost<MailServerCheckResponse>('/mail-server-check', {});
+      mailServerCheck = response.mailServer;
+    } catch (err) {
+      if (isRecoverableAuthError(err)) {
+        recoverableAuthError = true;
+        mailServerError = 'Authentication is not ready or admin access was denied.';
+      } else {
+        mailServerError = err instanceof Error ? err.message : 'Failed to check backend mail server';
+      }
+    } finally {
+      mailServerChecking = false;
     }
   }
 
@@ -271,6 +300,32 @@
 
   function hasCounts(values: number[]) {
     return values.some((value) => value > 0);
+  }
+
+  function mailServerState(authDisabled: boolean | undefined, checking: boolean, check: MailServerCheck | null): MailServerState {
+    if (authDisabled) return 'disabled';
+    if (checking && !check) return 'checking';
+    if (!check) return 'unknown';
+    return check.code ? 'error' : 'ok';
+  }
+
+  function mailServerBadgeColor(state: MailServerState): MailServerBadgeColor {
+    if (state === 'ok') return 'green';
+    if (state === 'error') return 'red';
+    if (state === 'disabled') return 'yellow';
+    return 'blue';
+  }
+
+  function mailServerStatusLabel(state: MailServerState) {
+    if (state === 'ok') return 'Connected';
+    if (state === 'error') return 'Failed';
+    if (state === 'disabled') return 'Unavailable';
+    if (state === 'checking') return 'Checking';
+    return 'Not checked';
+  }
+
+  function boolLabel(value: boolean) {
+    return value ? 'Yes' : 'No';
   }
 
   function openResetModal() {
@@ -419,6 +474,45 @@
                     <div class="mx-auto flex aspect-square w-full max-w-52 items-center justify-center rounded-full border-[18px] border-slate-200 text-sm font-medium text-slate-500">No data</div>
                   {/if}
                 </div>
+              </div>
+            </section>
+
+            <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div class="flex min-w-0 items-start gap-3">
+                  <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+                    <Icon icon="mdi:server-network" class="h-6 w-6" />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h2 class="text-base font-semibold text-slate-950">Backend mail server</h2>
+                      <Badge color={mailServerBadgeColorValue}>{mailServerStatusLabelValue}</Badge>
+                    </div>
+                    <div class="mt-2 grid gap-x-6 gap-y-1 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
+                      <div>Reachable: <span class="font-medium text-slate-900">{mailServerCheck ? boolLabel(mailServerCheck.reachable) : '-'}</span></div>
+                      <div>SMTP auth: <span class="font-medium text-slate-900">{mailServerCheck ? (mailServerCheck.authenticationEnabled ? boolLabel(mailServerCheck.authenticated) : 'Disabled') : '-'}</span></div>
+                      <div>TLS active: <span class="font-medium text-slate-900">{mailServerCheck ? boolLabel(mailServerCheck.tlsActive) : '-'}</span></div>
+                      <div>Latency: <span class="font-medium text-slate-900">{mailServerCheck ? `${mailServerCheck.latencyMs} ms` : '-'}</span></div>
+                    </div>
+                    <div class="mt-2 text-sm text-slate-500">
+                      {#if me?.authDisabled}
+                        Header authentication required
+                      {:else if mailServerError}
+                        {mailServerError}
+                      {:else if mailServerCheck?.message}
+                        {mailServerCheck.message}
+                      {:else if mailServerCheck?.checkedAt}
+                        Last checked {fmtTime(mailServerCheck.checkedAt)}
+                      {:else}
+                        Waiting for first check
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+                <Button color="alternative" disabled={me?.authDisabled || mailServerChecking} onclick={loadMailServerCheck}>
+                  <Icon icon="mdi:refresh" class={`h-4 w-4 ${mailServerChecking ? 'animate-spin' : ''}`} />
+                  <span>{mailServerChecking ? 'Checking' : 'Check now'}</span>
+                </Button>
               </div>
             </section>
 

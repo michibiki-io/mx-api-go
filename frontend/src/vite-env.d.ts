@@ -5,6 +5,7 @@ declare global {
     MX_API_ADMIN?: {
       apiBasePath: string;
       dashboardBasePath: string;
+      dashboardToken?: string;
     };
   }
 }

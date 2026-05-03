@@ -47,6 +47,17 @@ type Sender interface {
 	Send(context.Context, Message) error
 }
 
+type CheckResult struct {
+	Reachable             bool      `json:"reachable"`
+	AuthenticationEnabled bool      `json:"authenticationEnabled"`
+	Authenticated         bool      `json:"authenticated"`
+	TLSActive             bool      `json:"tlsActive"`
+	CheckedAt             time.Time `json:"checkedAt"`
+	LatencyMS             int64     `json:"latencyMs"`
+	Code                  string    `json:"code,omitempty"`
+	Message               string    `json:"message,omitempty"`
+}
+
 type SMTPSender struct {
 	cfg *config.Config
 }
@@ -164,6 +175,67 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	return nil
 }
 
+func (s *SMTPSender) Check(ctx context.Context) CheckResult {
+	start := time.Now()
+	result := CheckResult{
+		AuthenticationEnabled: s.cfg.SMTP.AuthenticationEnabled,
+		CheckedAt:             start.UTC(),
+	}
+	fail := func(code, message string) CheckResult {
+		result.Code = code
+		result.Message = message
+		result.LatencyMS = time.Since(start).Milliseconds()
+		return result
+	}
+
+	if s.cfg.SMTP.ServerAddr == "" {
+		return fail("invalid_config", "SMTP server address is empty")
+	}
+	host, _, err := net.SplitHostPort(s.cfg.SMTP.ServerAddr)
+	if err != nil {
+		return fail("invalid_config", "SMTP server address is invalid")
+	}
+
+	conn, err := s.dial(ctx, host)
+	if err != nil {
+		return fail(checkErrorCode(ctx, err), "SMTP server is unreachable")
+	}
+	defer conn.Close()
+	result.Reachable = true
+	result.TLSActive = strings.EqualFold(s.cfg.SMTP.TLSMode, "implicit")
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return fail("protocol_failed", "SMTP handshake failed")
+	}
+	defer client.Quit()
+
+	if strings.EqualFold(s.cfg.SMTP.TLSMode, "starttls") {
+		tlsCfg := s.tlsConfig(host)
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return fail("tls_failed", "SMTP server does not advertise STARTTLS")
+		}
+		if err := client.StartTLS(tlsCfg); err != nil {
+			return fail("tls_failed", "SMTP STARTTLS failed")
+		}
+		result.TLSActive = true
+	}
+
+	if s.cfg.SMTP.AuthenticationEnabled {
+		auth := smtp.PlainAuth("", s.cfg.SMTP.ClientUsername, s.cfg.SMTP.ClientPassword, host)
+		if err := client.Auth(auth); err != nil {
+			return fail("auth_failed", "SMTP authentication failed")
+		}
+		result.Authenticated = true
+	}
+
+	if err := client.Noop(); err != nil {
+		return fail("protocol_failed", "SMTP NOOP failed")
+	}
+	result.LatencyMS = time.Since(start).Milliseconds()
+	return result
+}
+
 func prepareMessage(msg Message) (preparedMessage, error) {
 	if containsHeaderLineBreak(msg.Subject) {
 		return preparedMessage{}, fmt.Errorf("unsafe subject header")
@@ -228,6 +300,17 @@ func (s *SMTPSender) dial(ctx context.Context, host string) (net.Conn, error) {
 		return nil, fmt.Errorf("dial smtp %s: %w", s.cfg.SMTP.ServerAddr, err)
 	}
 	return conn, nil
+}
+
+func checkErrorCode(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	return "connection_failed"
 }
 
 func (s *SMTPSender) tlsConfig(host string) *tls.Config {

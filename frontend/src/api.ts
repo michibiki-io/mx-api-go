@@ -69,6 +69,22 @@ export type AuditOptions = {
   results: string[];
 };
 
+export type MailServerCheck = {
+  reachable: boolean;
+  authenticationEnabled: boolean;
+  authenticated: boolean;
+  tlsActive: boolean;
+  checkedAt: string;
+  latencyMs: number;
+  code?: string;
+  message?: string;
+};
+
+export type MailServerCheckResponse = {
+  status: string;
+  mailServer: MailServerCheck;
+};
+
 export type AuditFilters = {
   range: string;
   from: string;
@@ -86,7 +102,8 @@ export type AuditFilters = {
 
 const config = window.MX_API_ADMIN ?? {
   apiBasePath: '/_admin/api/v1',
-  dashboardBasePath: '/admin'
+  dashboardBasePath: '/admin',
+  dashboardToken: ''
 };
 
 const transientAuthRetryDelays = [500, 1500];
@@ -110,7 +127,7 @@ export function apiBasePath(): string {
 export async function apiGet<T>(path: string, params?: URLSearchParams): Promise<T> {
   const suffix = params && params.toString() ? `${path}?${params.toString()}` : path;
   const response = await fetch(`${apiBasePath()}${suffix}`, {
-    headers: { Accept: 'application/json' }
+    headers: requestHeaders({ Accept: 'application/json' })
   });
   if (!response.ok) {
     const body = await response.text();
@@ -135,10 +152,10 @@ export async function apiGetWithAuthRecovery<T>(path: string, params?: URLSearch
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${apiBasePath()}${path}`, {
     method: 'POST',
-    headers: {
+    headers: requestHeaders({
       Accept: 'application/json',
       'Content-Type': 'application/json'
-    },
+    }),
     body: JSON.stringify(body)
   });
   if (!response.ok) {
@@ -146,6 +163,15 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     throw new ApiError(response.status, responseBody);
   }
   return response.json() as Promise<T>;
+}
+
+function requestHeaders(headers: Record<string, string>): HeadersInit {
+  const token = config.dashboardToken?.trim();
+  if (!token) return headers;
+  return {
+    ...headers,
+    'X-MX-API-Dashboard-Token': token
+  };
 }
 
 export function isTransientAuthStatus(status: number): boolean {

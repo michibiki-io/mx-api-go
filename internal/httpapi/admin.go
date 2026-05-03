@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michibiki-io/mx-api-go/internal/adminui"
 	"github.com/michibiki-io/mx-api-go/internal/audit"
 	"github.com/michibiki-io/mx-api-go/internal/version"
 )
@@ -61,6 +63,7 @@ func (h *Handler) adminAuditOptions(c *gin.Context) {
 			"/_admin/api/v1/me",
 			"/_admin/api/v1/request-metrics",
 			"/_admin/api/v1/audit-events",
+			"/_admin/api/v1/mail-server-check",
 		},
 		"results": []string{audit.ResultSuccess, audit.ResultFailure, audit.ResultDenied},
 	})
@@ -209,6 +212,42 @@ func (h *Handler) adminAuditReset(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+func (h *Handler) adminMailServerCheck(c *gin.Context) {
+	timeout := h.cfg.SMTP.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
+
+	result := h.mailChecker.Check(ctx)
+	status := "Ok"
+	auditResult := audit.ResultSuccess
+	message := "Admin checked backend mail server"
+	if result.Code != "" {
+		status = "Error"
+		auditResult = audit.ResultFailure
+		message = "Backend mail server check failed"
+	}
+	h.recordAdminMailServerCheck(c, auditResult, message, result.Code)
+	c.JSON(http.StatusOK, gin.H{
+		"status":     status,
+		"mailServer": result,
+	})
+}
+
+func (h *Handler) adminDashboardRuntimeConfig(_ *gin.Context, contextPath, dashboardBasePath string) adminui.RuntimeConfig {
+	prefix := strings.TrimRight(contextPath, "/")
+	cfg := adminui.RuntimeConfig{
+		APIBasePath:       prefix + "/_admin/api/v1",
+		DashboardBasePath: prefix + dashboardBasePath,
+	}
+	if strings.EqualFold(h.cfg.Admin.Auth.Mode, "header") && h.dashboardTokens != nil {
+		cfg.DashboardToken = h.dashboardTokens.Issue()
+	}
+	return cfg
+}
+
 func (h *Handler) recordAdminAPI(c *gin.Context, action, message string) {
 	identity := currentAdminIdentity(c)
 	h.recordAudit(c.Request.Context(), audit.Event{
@@ -225,6 +264,28 @@ func (h *Handler) recordAdminAPI(c *gin.Context, action, message string) {
 		RequestID:   requestID(c),
 		Message:     message,
 	})
+}
+
+func (h *Handler) recordAdminMailServerCheck(c *gin.Context, result, message, code string) {
+	identity := currentAdminIdentity(c)
+	event := audit.Event{
+		Actor:       identity.User,
+		ActorSource: "admin:" + identity.AuthMode,
+		Action:      "mail.server.check",
+		Method:      c.Request.Method,
+		Path:        c.Request.URL.Path,
+		Endpoint:    c.FullPath(),
+		StatusCode:  http.StatusOK,
+		Result:      result,
+		RemoteAddr:  clientAddress(c),
+		UserAgent:   c.Request.UserAgent(),
+		RequestID:   requestID(c),
+		Message:     message,
+	}
+	if code != "" {
+		event.ErrorCode = code
+	}
+	h.recordAudit(c.Request.Context(), event)
 }
 
 func queryInt(c *gin.Context, key string, fallback int) int {

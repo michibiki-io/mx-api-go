@@ -106,6 +106,28 @@ func (h *Handler) adminDashboardAccess() gin.HandlerFunc {
 	}
 }
 
+func (h *Handler) adminHeaderAuthRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if strings.EqualFold(strings.TrimSpace(h.cfg.Admin.Auth.Mode), "header") {
+			c.Next()
+			return
+		}
+		h.recordAdminDenied(c, http.StatusForbidden, "admin_header_auth_required", "Admin header authentication is required")
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin header authentication is required"})
+	}
+}
+
+func (h *Handler) adminDashboardTokenRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if h.dashboardTokens != nil && h.dashboardTokens.Valid(strings.TrimSpace(c.GetHeader(dashboardTokenHeader))) {
+			c.Next()
+			return
+		}
+		h.recordAdminDenied(c, http.StatusForbidden, "dashboard_token_invalid", "Admin dashboard token is invalid")
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin dashboard token is invalid"})
+	}
+}
+
 func (h *Handler) eventFromRequest(c *gin.Context, start time.Time) audit.Event {
 	statusCode := c.Writer.Status()
 	result := audit.ResultSuccess
@@ -126,6 +148,29 @@ func (h *Handler) eventFromRequest(c *gin.Context, start time.Time) audit.Event 
 			"queryPresent": c.Request.URL.RawQuery != "",
 		},
 	}
+}
+
+func (h *Handler) recordAdminDenied(c *gin.Context, status int, code, message string) {
+	identity := currentAdminIdentity(c)
+	actor := identity.User
+	if actor == "" {
+		actor = "anonymous"
+	}
+	h.recordAudit(c.Request.Context(), audit.Event{
+		Actor:       actor,
+		ActorSource: "admin:" + identity.AuthMode,
+		Action:      "admin.access.denied",
+		Method:      c.Request.Method,
+		Path:        c.Request.URL.Path,
+		Endpoint:    c.FullPath(),
+		StatusCode:  status,
+		Result:      audit.ResultDenied,
+		RemoteAddr:  clientAddress(c),
+		UserAgent:   c.Request.UserAgent(),
+		RequestID:   requestID(c),
+		ErrorCode:   code,
+		Message:     message,
+	})
 }
 
 func (h *Handler) adminIdentityFromRequest(c *gin.Context) (adminIdentity, int, bool) {

@@ -32,6 +32,7 @@ var knownActions = []string{
 	"admin.dashboard.view",
 	"admin.access.denied",
 	"admin.metrics.view",
+	"mail.server.check",
 	"audit.view",
 	"audit.detail.view",
 	"audit.reset",

@@ -2,6 +2,7 @@ package adminui
 
 import (
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -14,7 +15,15 @@ import (
 //go:embed dist/* dist/assets/*
 var assets embed.FS
 
-func Register(root *gin.RouterGroup, basePath string, middleware ...gin.HandlerFunc) {
+type RuntimeConfig struct {
+	APIBasePath       string `json:"apiBasePath"`
+	DashboardBasePath string `json:"dashboardBasePath"`
+	DashboardToken    string `json:"dashboardToken,omitempty"`
+}
+
+type RuntimeConfigFunc func(*gin.Context, string, string) RuntimeConfig
+
+func Register(root *gin.RouterGroup, basePath string, runtimeConfig RuntimeConfigFunc, middleware ...gin.HandlerFunc) {
 	basePath = "/" + strings.Trim(strings.TrimSpace(basePath), "/")
 	ui := root.Group(basePath, middleware...)
 	ui.GET("", redirectToSlash(basePath))
@@ -24,7 +33,7 @@ func Register(root *gin.RouterGroup, basePath string, middleware ...gin.HandlerF
 			name = "index.html"
 		}
 		if name == "config.js" {
-			configJS(root.BasePath(), basePath)(c)
+			configJS(root.BasePath(), basePath, runtimeConfig)(c)
 			return
 		}
 		if fileExists(name) {
@@ -35,14 +44,27 @@ func Register(root *gin.RouterGroup, basePath string, middleware ...gin.HandlerF
 	})
 }
 
-func configJS(contextPath, dashboardBasePath string) gin.HandlerFunc {
+func configJS(contextPath, dashboardBasePath string, runtimeConfig RuntimeConfigFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		prefix := strings.TrimRight(contextPath, "/")
+		cfg := defaultRuntimeConfig(contextPath, dashboardBasePath)
+		if runtimeConfig != nil {
+			cfg = runtimeConfig(c, contextPath, dashboardBasePath)
+		}
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
 		c.Header("Content-Type", "application/javascript; charset=utf-8")
-		c.String(http.StatusOK, `window.MX_API_ADMIN = {
-  apiBasePath: %q,
-  dashboardBasePath: %q
-};`, prefix+"/_admin/api/v1", prefix+dashboardBasePath)
+		c.String(http.StatusOK, "window.MX_API_ADMIN = %s;", data)
+	}
+}
+
+func defaultRuntimeConfig(contextPath, dashboardBasePath string) RuntimeConfig {
+	prefix := strings.TrimRight(contextPath, "/")
+	return RuntimeConfig{
+		APIBasePath:       prefix + "/_admin/api/v1",
+		DashboardBasePath: prefix + dashboardBasePath,
 	}
 }
 

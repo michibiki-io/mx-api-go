@@ -20,12 +20,14 @@ type Handler struct {
 	cfg                *config.Config
 	validator          *requestvalidator.Engine
 	mailer             mail.Sender
+	mailChecker        *mail.SMTPSender
 	logger             *zap.Logger
 	audit              audit.Recorder
 	auditRead          auditReader
 	rateLimiter        *fixedWindowLimiter
 	failureRateLimiter *fixedWindowLimiter
 	idempotency        *idempotencyStore
+	dashboardTokens    *dashboardTokenStore
 }
 
 type auditReader interface {
@@ -52,11 +54,13 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 		cfg:                cfg,
 		validator:          validator,
 		mailer:             sender,
+		mailChecker:        mail.NewSMTPSender(cfg),
 		logger:             logger,
 		audit:              recorder,
 		rateLimiter:        newFixedWindowLimiter(rateLimitWindow),
 		failureRateLimiter: newFixedWindowLimiter(rateLimitWindow),
 		idempotency:        newIdempotencyStore(time.Duration(cfg.Security.Idempotency.TTLSeconds) * time.Second),
+		dashboardTokens:    newDashboardTokenStore(30 * time.Minute),
 	}
 	if reader, ok := recorder.(auditReader); ok {
 		handler.auditRead = reader
@@ -100,8 +104,9 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 			adminAPI.GET("/audit-events", handler.adminAuditEvents)
 			adminAPI.GET("/audit-events/:id", handler.adminAuditEvent)
 			adminAPI.POST("/audit-events/reset", handler.adminAuditReset)
+			adminAPI.POST("/mail-server-check", handler.adminHeaderAuthRequired(), handler.adminDashboardTokenRequired(), handler.adminMailServerCheck)
 		}
-		adminui.Register(root, cfg.Admin.Dashboard.BasePath, handler.adminRequired(), handler.adminDashboardAccess())
+		adminui.Register(root, cfg.Admin.Dashboard.BasePath, handler.adminDashboardRuntimeConfig, handler.adminRequired(), handler.adminDashboardAccess())
 	}
 
 	return engine

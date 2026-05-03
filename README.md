@@ -57,6 +57,7 @@ When the admin dashboard is enabled, the following administrator endpoints are a
 - `GET /_admin/api/v1/audit-events`
 - `GET /_admin/api/v1/audit-events/:id`
 - `POST /_admin/api/v1/audit-events/reset`
+- `POST /_admin/api/v1/mail-server-check`
 
 Validation errors use this response shape:
 
@@ -155,9 +156,9 @@ SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SM
 
 ### English Admin Dashboard and Audit Logs
 
-`mx-api` can serve a lightweight administrator dashboard at `admin.dashboard.base_path` (default: `/admin`). The dashboard contains API/validation/mail/status doughnut charts, an API request trend chart, server-side audit log filters, pagination, a row detail modal, and a guarded audit-log reset dialog.
+`mx-api` can serve a lightweight administrator dashboard at `admin.dashboard.base_path` (default: `/admin`). The dashboard contains API/validation/mail/status doughnut charts, a backend mail server connectivity check, an API request trend chart, server-side audit log filters, pagination, a row detail modal, and a guarded audit-log reset dialog.
 
-The dashboard is designed for operational visibility: administrators can scan request health from the top charts, inspect traffic trends, and then drill into individual audit events with filters and pagination.
+The dashboard is designed for operational visibility: administrators can scan request health from the top charts, check whether the configured SMTP server is reachable and accepts authentication, inspect traffic trends, and then drill into individual audit events with filters and pagination. The backend mail server check is available only when admin authentication mode is `header`; it is disabled when admin auth mode is `none`.
 
 Dashboard view:
 
@@ -230,7 +231,7 @@ docker compose up --build
 
 Edit `dev/.env` with your SMTP credentials before starting the stack.
 
-Open `http://localhost:5173`. The frontend reads `GET /api/v1/schema` and builds the input form from backend config.
+Open `http://localhost:5173`. The frontend reads `GET /contact/api/v1/schema` and builds the input form from backend config.
 
 The compose stack also exposes the embedded admin dashboard at:
 
@@ -343,6 +344,7 @@ docker build \
 - `GET /_admin/api/v1/audit-events`
 - `GET /_admin/api/v1/audit-events/:id`
 - `POST /_admin/api/v1/audit-events/reset`
+- `POST /_admin/api/v1/mail-server-check`
 
 validation error は以下のレスポンス形式です。
 
@@ -450,9 +452,9 @@ server:
 
 ### 管理ダッシュボードと監査ログ
 
-`mx-api` は `admin.dashboard.base_path`（デフォルト `/admin`）で軽量な管理者向け dashboard を配信できます。dashboard には API / validation / mail / status の doughnut chart、API request trend graph、server-side filter 付き audit log table、pagination、row detail modal、確認付き audit-log reset dialog が含まれます。
+`mx-api` は `admin.dashboard.base_path`（デフォルト `/admin`）で軽量な管理者向け dashboard を配信できます。dashboard には API / validation / mail / status の doughnut chart、backend mail server connectivity check、API request trend graph、server-side filter 付き audit log table、pagination、row detail modal、確認付き audit-log reset dialog が含まれます。
 
-dashboard は運用状況を素早く確認するための画面です。上段の chart で request health を把握し、request trend を確認したうえで、filter と pagination を使って個別の audit event を調査できます。
+dashboard は運用状況を素早く確認するための画面です。上段の chart で request health を把握し、設定済み SMTP server への到達性と認証可否を確認し、request trend を確認したうえで、filter と pagination を使って個別の audit event を調査できます。backend mail server check は admin authentication mode が `header` の場合だけ有効で、`none` では無効です。
 
 Dashboard view:
 
@@ -569,7 +571,7 @@ docker compose up --build
 
 起動前に `dev/.env` の SMTP 認証情報を編集してください。
 
-Frontend は `http://localhost:5173` です。Frontend は `GET /api/v1/schema` を読み取り、backend config に基づいて入力欄を生成します。
+Frontend は `http://localhost:5173` です。Frontend は `GET /contact/api/v1/schema` を読み取り、backend config に基づいて入力欄を生成します。
 
 compose stack では、埋め込み管理ダッシュボードも以下で開けます。
 
