@@ -1,0 +1,18 @@
+apiVersion: v2
+name: mx-api-go
+description: Helm chart for deploying the mx-api sendmail API microservice
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/michibiki-io/mx-api-go
+sources:
+  - https://github.com/michibiki-io/mx-api-go
+keywords:
+  - mail
+  - sendmail
+  - api
+  - kubernetes
+  - helm
+maintainers:
+  - name: michibiki-io
+    url: https://github.com/michibiki-io

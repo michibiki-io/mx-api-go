@@ -1,0 +1,126 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/michibiki-io/mx-api-go
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  externalName: ""
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: mx-api.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+
+livenessProbe: {}
+readinessProbe: {}
+startupProbe: null
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: null
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+  mountPath: /var/lib/mx-api
+
+config:
+  MX_API_CONFIG: /etc/mx-api/config.yaml
+  CONTEXT_PATH: /contact
+  BIND_PORT: "8080"
+  MODE: release
+  ALLOWED_ORIGINS: ""
+  MX_API_RATE_LIMIT_ENABLED: "true"
+  MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE: "60"
+  MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE: "20"
+  MX_API_IDEMPOTENCY_ENABLED: "true"
+  MX_API_IDEMPOTENCY_TTL_SECONDS: "600"
+  SMTP_SERVER_ADDR: ""
+  SMTP_AUTHENTICATION_ENABLED: "true"
+  SMTP_SKIP_VERIFY_CERT: "false"
+  SMTP_TLS_MODE: implicit
+  CONTACT_REPLY_EMAIL: ""
+  CONTACT_REPLY_BCC_EMAIL: ""
+  CONTACT_FORM_REQUIRED_FIELD: ""
+  EMAIL_SUBJECT: ""
+  HOMEPAGE_NAME: ""
+  HOMEPAGE_URL: ""
+  MAIL_TEMPLATE_PATH: ""
+  MAIL_TIMEZONE: Asia/Tokyo
+  MAIL_SUBMITTED_AT_FORMAT: "2006-01-02 15:04:05 MST"
+  MX_API_ADMIN_DASHBOARD_ENABLED: "true"
+  MX_API_ADMIN_BASE_PATH: /admin
+  MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT: "2006-01-02 15:04:05 MST"
+  MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE: Asia/Tokyo
+  MX_API_ADMIN_AUTH_MODE: header
+  MX_API_ADMIN_AUTH_USER_HEADER: X-Forwarded-User
+  MX_API_ADMIN_AUTH_EMAIL_HEADER: X-Forwarded-Email
+  MX_API_ADMIN_AUTH_GROUPS_HEADER: X-Forwarded-Groups
+  MX_API_ADMIN_ALLOWED_USERS: ""
+  MX_API_ADMIN_ALLOWED_GROUPS: mx-api-admins
+  MX_API_AUDIT_ENABLED: "true"
+  MX_API_AUDIT_STORAGE_TYPE: sqlite
+  MX_API_AUDIT_SQLITE_PATH: /var/lib/mx-api/audit.db
+  MX_API_AUDIT_RETENTION_DAYS: "90"
+
+secrets:
+  SMTP_CLIENT_USERNAME: ""
+  SMTP_CLIENT_PASSWORD: ""
+
+existingSecret: ""
+
+configFile:
+  enabled: true
+  mountPath: /etc/mx-api/config.yaml
+  data: {}
