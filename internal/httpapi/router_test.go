@@ -457,6 +457,68 @@ func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
 	}
 }
 
+func TestAdminMailServerCheckRequiresHeaderAuthAndDashboardToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.SMTP.ServerAddr = "127.0.0.1:1"
+	cfg.SMTP.TLSMode = "plain"
+	cfg.SMTP.AuthenticationEnabled = false
+	cfg.SMTP.Timeout = 50 * time.Millisecond
+	router, _ := testRouterWithAudit(t, cfg, &fakeSender{})
+
+	req := httptest.NewRequest(http.MethodPost, "/_admin/api/v1/mail-server-check", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	setAdminHeaders(req)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status without dashboard token = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	token := dashboardTokenFromConfigJS(t, router)
+	req = httptest.NewRequest(http.MethodPost, "/_admin/api/v1/mail-server-check", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(dashboardTokenHeader, token)
+	setAdminHeaders(req)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status with dashboard token = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Status     string `json:"status"`
+		MailServer struct {
+			Reachable             bool   `json:"reachable"`
+			AuthenticationEnabled bool   `json:"authenticationEnabled"`
+			Code                  string `json:"code"`
+		} `json:"mailServer"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Status != "Error" || body.MailServer.Code == "" || body.MailServer.AuthenticationEnabled {
+		t.Fatalf("unexpected mail server check response: %#v", body)
+	}
+}
+
+func TestAdminMailServerCheckDisabledWhenAdminAuthNone(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.Mode = "none"
+	router, _ := testRouterWithAudit(t, cfg, &fakeSender{})
+
+	req := httptest.NewRequest(http.MethodPost, "/_admin/api/v1/mail-server-check", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(dashboardTokenHeader, "01234567-89ab-4def-8123-456789abcdef")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "admin header authentication is required") {
+		t.Fatalf("unexpected body = %s", rec.Body.String())
+	}
+}
+
 func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.Mode = "none"
@@ -562,4 +624,26 @@ func validRequest(method, path string) *http.Request {
 	req.Header.Set("Origin", "http://localhost:5173")
 	req.Header.Set("Referer", "http://localhost:5173/")
 	return req
+}
+
+func setAdminHeaders(req *http.Request) {
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	req.Header.Set("X-Forwarded-Email", "alice@example.com")
+	req.Header.Set("X-Forwarded-Groups", "mx-api-admins")
+}
+
+func dashboardTokenFromConfigJS(t *testing.T, router http.Handler) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/admin/config.js", nil)
+	setAdminHeaders(req)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("config.js status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	matches := regexp.MustCompile(`"dashboardToken":"([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})"`).FindStringSubmatch(rec.Body.String())
+	if len(matches) != 2 {
+		t.Fatalf("dashboard token missing in config.js: %s", rec.Body.String())
+	}
+	return matches[1]
 }

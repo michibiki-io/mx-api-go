@@ -9,6 +9,23 @@ let fields = [];
 let apiBasePath = "/api/v1";
 let sendInFlightKey = "";
 
+const setDefaultAPIBase = () => {
+  if (apiBaseInput.value) {
+    return;
+  }
+  const port = apiBaseInput.dataset.apiPort || "8080";
+  const contextPath = apiBaseInput.dataset.contextPath || "";
+  apiBaseInput.value = `${window.location.protocol}//${window.location.hostname}:${port}${contextPath}`;
+};
+
+const apiBase = () => apiBaseInput.value.replace(/\/$/, "");
+
+const apiPath = (path) => {
+  const baseURL = new URL(apiBase());
+  const basePath = baseURL.pathname.replace(/\/$/, "");
+  return basePath ? `/api/v1${path}` : `${apiBasePath}${path}`;
+};
+
 const fieldElement = (field) => {
   const id = `field-${field.name}`;
   const wrapper = document.createElement("label");
@@ -94,9 +111,6 @@ const newIdempotencyKey = () => {
 };
 
 const request = async (path) => {
-  const baseURL = new URL(apiBaseInput.value);
-  const basePath = baseURL.pathname.replace(/\/$/, "");
-  const resolvedAPIBasePath = basePath && basePath !== "" ? "/api/v1" : apiBasePath;
   const headers = { "Content-Type": "application/json" };
   if (path === "/sendmail") {
     if (!sendInFlightKey) {
@@ -105,7 +119,7 @@ const request = async (path) => {
     headers["Idempotency-Key"] = sendInFlightKey;
   }
   try {
-    const res = await fetch(`${apiBaseInput.value}${resolvedAPIBasePath}${path}`, {
+    const res = await fetch(`${apiBase()}${apiPath(path)}`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload()),
@@ -121,7 +135,7 @@ const request = async (path) => {
 
 const loadSchema = async () => {
   schemaState.textContent = "Loading form schema";
-  const res = await fetch(`${apiBaseInput.value}/api/v1/schema`);
+  const res = await fetch(`${apiBase()}${apiPath("/schema")}`);
   const schema = await res.json();
   fields = schema.fields || [];
   apiBasePath = schema.apiBasePath || "/api/v1";
@@ -134,6 +148,7 @@ document.querySelector("#validate").addEventListener("click", () => request("/va
 document.querySelector("#send").addEventListener("click", () => request("/sendmail"));
 apiBaseInput.addEventListener("change", loadSchema);
 
+setDefaultAPIBase();
 loadSchema().catch((error) => {
   schemaState.textContent = "Schema load failed";
   setResponse("Error", { error: error.message });

@@ -6,6 +6,7 @@ security:
   allowed_origins:
     - "www.example.com"
     - "localhost:5173"
+    - "127.0.0.1:5173"
   rate_limit:
     enabled: true
     requests_per_minute: 60

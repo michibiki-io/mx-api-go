@@ -188,7 +188,7 @@ func Default() *Config {
 			ShutdownTimeout:   10 * time.Second,
 		},
 		Security: SecurityConfig{
-			AllowedOrigins: []string{"127.0.0.1", "localhost", "localhost:5173"},
+			AllowedOrigins: []string{"127.0.0.1", "localhost", "localhost:5173", "127.0.0.1:5173"},
 			RateLimit: RateLimitConfig{
 				Enabled:                  true,
 				RequestsPerMinute:        60,
