@@ -13,20 +13,6 @@ on:
       - "scripts/e2e-smoke.sh"
       - "Makefile"
       - ".github/workflows/helm-e2e.yml"
-  push:
-    branches:
-      - main
-    paths:
-      - "Dockerfile"
-      - "go.mod"
-      - "go.sum"
-      - "**/*.go"
-      - "frontend/**"
-      - "deploy/chart/**"
-      - "scripts/helm-e2e-kind.sh"
-      - "scripts/e2e-smoke.sh"
-      - "Makefile"
-      - ".github/workflows/helm-e2e.yml"
 
 jobs:
   helm-e2e:
