@@ -1,0 +1,21 @@
+Release name: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Service: {{ include "mx-api-go.fullname" . }}
+Service port: {{ .Values.service.port }}
+Context path: {{ include "mx-api-go.contextPath" . }}
+Health path: {{ include "mx-api-go.healthPath" . }}
+
+{{- if .Values.ingress.enabled }}
+Ingress endpoints:
+{{- range $host := .Values.ingress.hosts }}
+  {{- $paths := $host.paths | default (list (dict "path" "/" "pathType" "Prefix")) }}
+  {{- range $path := $paths }}
+  - {{- if $.Values.ingress.tls }} https://{{ else }} http://{{ end }}{{ $host.host }}{{ $path.path }}
+  {{- end }}
+{{- end }}
+{{- else }}
+Ingress is disabled.
+
+To access the service locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "mx-api-go.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}

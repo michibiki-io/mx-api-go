@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mx-api-go.fullname" . }}
+  labels:
+    {{- include "mx-api-go.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  {{- if and (eq (include "mx-api-go.dataVolumeEnabled" .) "true") (not .Values.autoscaling.enabled) }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "mx-api-go.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "mx-api-go.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "mx-api-go.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ include "mx-api-go.name" . }}
+          {{- $defaultLivenessProbe := dict "httpGet" (dict "path" (include "mx-api-go.healthPath" .) "port" "http") "initialDelaySeconds" 10 "periodSeconds" 10 }}
+          {{- $defaultReadinessProbe := dict "httpGet" (dict "path" (include "mx-api-go.healthPath" .) "port" "http") "initialDelaySeconds" 5 "periodSeconds" 5 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "mx-api-go.configMapName" . }}
+            - secretRef:
+                name: {{ include "mx-api-go.secretName" . }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          livenessProbe:
+            {{- toYaml (mergeOverwrite (deepCopy $defaultLivenessProbe) .Values.livenessProbe) | nindent 12 }}
+          readinessProbe:
+            {{- toYaml (mergeOverwrite (deepCopy $defaultReadinessProbe) .Values.readinessProbe) | nindent 12 }}
+          {{- with .Values.startupProbe }}
+          {{- $defaultStartupProbe := dict "httpGet" (dict "path" (include "mx-api-go.healthPath" $) "port" "http") }}
+          startupProbe:
+            {{- toYaml (mergeOverwrite (deepCopy $defaultStartupProbe) .) | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.configFile.enabled }}
+            - name: config
+              mountPath: {{ .Values.configFile.mountPath }}
+              subPath: config.yaml
+              readOnly: true
+            {{- end }}
+            {{- if eq (include "mx-api-go.dataVolumeEnabled" .) "true" }}
+            - name: data
+              mountPath: {{ include "mx-api-go.dataMountPath" . }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.configFile.enabled }}
+        - name: config
+          configMap:
+            name: {{ include "mx-api-go.configMapName" . }}
+            items:
+              - key: config.yaml
+                path: config.yaml
+        {{- end }}
+        {{- if eq (include "mx-api-go.dataVolumeEnabled" .) "true" }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (include "mx-api-go.fullname" .) .Values.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
