@@ -167,8 +167,9 @@ audit:
   retention_days: 90
 smtp:
   server_addr: {{ default "smtp.example.com:465" (index .Values.config "SMTP_SERVER_ADDR") | quote }}
-  authentication_enabled: true
-  tls_mode: "implicit"
+  authentication_enabled: {{ eq (lower (default "true" (index .Values.config "SMTP_AUTHENTICATION_ENABLED"))) "true" }}
+  skip_verify_cert: {{ eq (lower (default "false" (index .Values.config "SMTP_SKIP_VERIFY_CERT"))) "true" }}
+  tls_mode: {{ default "implicit" (index .Values.config "SMTP_TLS_MODE") | quote }}
 mail:
   from: {{ default "noreply@example.com" (index .Values.config "CONTACT_REPLY_EMAIL") | quote }}
   recipients:

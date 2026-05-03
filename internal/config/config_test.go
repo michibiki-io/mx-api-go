@@ -302,6 +302,30 @@ func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesSMTPEnvironment(t *testing.T) {
+	t.Setenv("SMTP_SERVER_ADDR", "mailpit:1025")
+	t.Setenv("SMTP_AUTHENTICATION_ENABLED", "false")
+	t.Setenv("SMTP_SKIP_VERIFY_CERT", "true")
+	t.Setenv("SMTP_TLS_MODE", "plain")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SMTP.ServerAddr != "mailpit:1025" {
+		t.Fatalf("ServerAddr = %q, want mailpit:1025", cfg.SMTP.ServerAddr)
+	}
+	if cfg.SMTP.AuthenticationEnabled {
+		t.Fatal("AuthenticationEnabled should be false from env")
+	}
+	if !cfg.SMTP.SkipVerifyCert {
+		t.Fatal("SkipVerifyCert should be true from env")
+	}
+	if cfg.SMTP.TLSMode != "plain" {
+		t.Fatalf("TLSMode = %q, want plain", cfg.SMTP.TLSMode)
+	}
+}
+
 func fieldByName(fields []FieldConfig, name string) (FieldConfig, bool) {
 	for _, field := range fields {
 		if field.Name == name {

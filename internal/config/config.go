@@ -515,6 +515,7 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.SMTP.ServerAddr, "SMTP_SERVER_ADDR")
 	setBool(&cfg.SMTP.AuthenticationEnabled, "SMTP_AUTHENTICATION_ENABLED")
 	setBool(&cfg.SMTP.SkipVerifyCert, "SMTP_SKIP_VERIFY_CERT")
+	setString(&cfg.SMTP.TLSMode, "SMTP_TLS_MODE")
 	cfg.SMTP.ClientUsername = os.Getenv("SMTP_CLIENT_USERNAME")
 	cfg.SMTP.ClientPassword = os.Getenv("SMTP_CLIENT_PASSWORD")
 

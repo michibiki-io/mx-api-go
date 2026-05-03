@@ -1,0 +1,55 @@
+name: compose-e2e
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "go.mod"
+      - "go.sum"
+      - "**/*.go"
+      - "frontend/**"
+      - "dev/**"
+      - "configs/**"
+      - "docker-compose.yaml"
+      - "docker-compose.e2e.yaml"
+      - "scripts/e2e-smoke.sh"
+      - "Makefile"
+      - ".github/workflows/compose-e2e.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "Dockerfile"
+      - "go.mod"
+      - "go.sum"
+      - "**/*.go"
+      - "frontend/**"
+      - "dev/**"
+      - "configs/**"
+      - "docker-compose.yaml"
+      - "docker-compose.e2e.yaml"
+      - "scripts/e2e-smoke.sh"
+      - "Makefile"
+      - ".github/workflows/compose-e2e.yml"
+
+jobs:
+  compose-e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run compose e2e
+        run: |
+          make compose-e2e
+
+      - name: Show compose logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yaml -f docker-compose.e2e.yaml ps || true
+          docker compose -f docker-compose.yaml -f docker-compose.e2e.yaml logs || true
+
+      - name: Stop compose stack
+        if: always()
+        run: |
+          make compose-e2e-down

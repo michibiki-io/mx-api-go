@@ -118,6 +118,7 @@ The following environment variables are supported:
 - `SMTP_SERVER_ADDR`
 - `SMTP_AUTHENTICATION_ENABLED`
 - `SMTP_SKIP_VERIFY_CERT`
+- `SMTP_TLS_MODE`
 - `SMTP_CLIENT_USERNAME`
 - `SMTP_CLIENT_PASSWORD`
 - `CONTACT_REPLY_EMAIL`
@@ -239,6 +240,55 @@ http://localhost:8080/contact/admin/
 
 For local development, `docker-compose.yaml` sets `MX_API_ADMIN_AUTH_MODE=none`, so the dashboard is reachable without trusted auth headers and displays the disabled-auth warning banner.
 
+For application-level e2e with Mailpit, run the shared compose test path:
+
+```sh
+make compose-e2e
+```
+
+This starts `docker-compose.yaml` with `docker-compose.e2e.yaml`, runs [scripts/e2e-smoke.sh](/home/staratlas@ad.michibiki.io/workspace/mx-api-go/scripts/e2e-smoke.sh), and verifies `/contact/helthz`, `/contact/api/v1/schema`, `/contact/api/v1/validate`, `/contact/api/v1/sendmail`, `/contact/admin/`, and Mailpit delivery. Stop it with:
+When the default e2e host ports are already occupied, `make compose-e2e` automatically selects free local ports for the API, frontend, and Mailpit.
+
+```sh
+make compose-e2e-down
+```
+
+For Helm chart e2e on a temporary kind cluster, run:
+
+```sh
+make e2e-kind
+```
+
+This workflow requires `kind`. Install it before running the target. For Linux:
+
+```sh
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+kind --version
+```
+
+For other platforms and package-manager options, see the official guide:
+https://kind.sigs.k8s.io/docs/user/quick-start/
+
+The kind workflow uses a repo-local kubeconfig at `.tmp/kind-mx-api-go-e2e.kubeconfig` by default and always passes it explicitly to `kubectl` and `helm`. It does not rely on `~/.kube/config`, so local and GitHub Actions runs target the same isolated kind cluster behavior.
+When the default local port-forward ports are already occupied, the script automatically selects free local ports unless `LOCAL_PORT` or `MAILPIT_LOCAL_PORT` is explicitly set.
+
+When a failure needs investigation, keep the cluster and dedicated kubeconfig:
+
+```sh
+KEEP_CLUSTER=true make e2e-kind
+kubectl --kubeconfig .tmp/kind-mx-api-go-e2e.kubeconfig -n mx-api-e2e get all
+```
+
+Remove the test cluster and kubeconfig later with:
+
+```sh
+make e2e-kind-clean
+```
+
+GitHub Actions uses the same `make compose-e2e` and `make e2e-kind` entrypoints, with the kind workflow setting `KEEP_ON_FAILURE=false` so CI always cleans up after the run.
+
 To rebuild the embedded admin dashboard assets locally:
 
 ```sh
@@ -354,6 +404,7 @@ validation:
 - `SMTP_SERVER_ADDR`
 - `SMTP_AUTHENTICATION_ENABLED`
 - `SMTP_SKIP_VERIFY_CERT`
+- `SMTP_TLS_MODE`
 - `SMTP_CLIENT_USERNAME`
 - `SMTP_CLIENT_PASSWORD`
 - `CONTACT_REPLY_EMAIL`
@@ -527,6 +578,55 @@ http://localhost:8080/contact/admin/
 ```
 
 ローカル開発用に `docker-compose.yaml` では `MX_API_ADMIN_AUTH_MODE=none` を設定しているため、trusted auth header なしで dashboard を開けます。この場合、UI には認証無効の警告 banner が表示されます。
+
+Mailpit を使ったアプリ単体 e2e は、共通 smoke test script を流用して以下で実行できます。
+
+```sh
+make compose-e2e
+```
+
+この target は `docker-compose.yaml` と `docker-compose.e2e.yaml` を重ねて起動し、[scripts/e2e-smoke.sh](/home/staratlas@ad.michibiki.io/workspace/mx-api-go/scripts/e2e-smoke.sh) で `/contact/helthz`、`/contact/api/v1/schema`、`/contact/api/v1/validate`、`/contact/api/v1/sendmail`、`/contact/admin/`、Mailpit への配信を確認します。停止は以下です。
+e2e 用のデフォルト host port が使用中の場合は、`make compose-e2e` が API、frontend、Mailpit の空き local port を自動選択します。
+
+```sh
+make compose-e2e-down
+```
+
+Helm chart の e2e は kind 上で以下を実行します。
+
+```sh
+make e2e-kind
+```
+
+この workflow の実行には `kind` が必要です。先に install してください。Linux の例:
+
+```sh
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+kind --version
+```
+
+他 platform や package manager の install 方法は公式 guide を参照してください。
+https://kind.sigs.k8s.io/docs/user/quick-start/
+
+kind e2e はデフォルトで `.tmp/kind-mx-api-go-e2e.kubeconfig` という repo-local な専用 kubeconfig を作成し、`kubectl` と `helm` のすべての cluster 操作でそれを明示指定します。`~/.kube/config` には依存しないため、ローカル実行でも GitHub Actions でも同じ安全な経路で kind cluster を操作します。
+また、port-forward のデフォルト local port が使用中の場合は、`LOCAL_PORT` / `MAILPIT_LOCAL_PORT` を明示指定していない限り、script が空いている local port を自動選択します。
+
+失敗時や調査時に cluster と専用 kubeconfig を残したい場合は以下を使います。
+
+```sh
+KEEP_CLUSTER=true make e2e-kind
+kubectl --kubeconfig .tmp/kind-mx-api-go-e2e.kubeconfig -n mx-api-e2e get all
+```
+
+後片付けは以下です。
+
+```sh
+make e2e-kind-clean
+```
+
+GitHub Actions でも同じ `make compose-e2e` と `make e2e-kind` を使っており、kind workflow では `KEEP_ON_FAILURE=false` を付けて毎回 cleanup します。
 
 埋め込み管理ダッシュボード assets をローカルで再生成する場合は以下を実行します。
 

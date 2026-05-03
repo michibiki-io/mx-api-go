@@ -134,6 +134,7 @@ oras repo tags ghcr.io/michibiki-io/charts/mx-api-go
 - `ingress.*`: host, path, class, TLS, and custom annotations
 - `persistence.*`: PVC creation and mount path for audit SQLite data
 - `config.CONTEXT_PATH`: public base path such as `/contact`
+- `config.SMTP_*`: SMTP server address, auth toggle, TLS mode, and certificate behavior
 - `config.MX_API_ADMIN_*`: admin dashboard and auth behavior
 - `config.MX_API_AUDIT_*`: audit log enablement, backend type, and retention
 - `secrets.*` or `existingSecret`: SMTP credentials

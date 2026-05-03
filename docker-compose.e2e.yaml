@@ -1,0 +1,43 @@
+services:
+  api:
+    restart: "no"
+    depends_on:
+      - mailpit
+    ports: !override
+      - "${COMPOSE_E2E_API_PORT:-18080}:8080"
+    environment:
+      SMTP_SERVER_ADDR: mailpit:1025
+      SMTP_AUTHENTICATION_ENABLED: "false"
+      SMTP_SKIP_VERIFY_CERT: "true"
+      SMTP_TLS_MODE: plain
+      SMTP_CLIENT_USERNAME: ""
+      SMTP_CLIENT_PASSWORD: ""
+
+      CONTACT_REPLY_EMAIL: noreply@example.test
+      CONTACT_REPLY_BCC_EMAIL: contact@example.test
+      EMAIL_SUBJECT: mx-api-go e2e test
+      HOMEPAGE_NAME: E2E Test Site
+      HOMEPAGE_URL: https://example.test
+
+      MX_API_ADMIN_DASHBOARD_ENABLED: "true"
+      MX_API_ADMIN_BASE_PATH: /admin
+      MX_API_ADMIN_AUTH_MODE: header
+      MX_API_ADMIN_AUTH_USER_HEADER: X-Forwarded-User
+      MX_API_ADMIN_AUTH_EMAIL_HEADER: X-Forwarded-Email
+      MX_API_ADMIN_AUTH_GROUPS_HEADER: X-Forwarded-Groups
+      MX_API_ADMIN_ALLOWED_GROUPS: mx-api-admins
+
+      MX_API_AUDIT_ENABLED: "true"
+      MX_API_AUDIT_SQLITE_PATH: /var/lib/mx-api/audit.db
+
+  frontend:
+    ports: !override
+      - "${COMPOSE_E2E_FRONTEND_PORT:-15173}:80"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports: !override
+      - "${COMPOSE_E2E_MAILPIT_PORT:-18025}:8025"
+    expose:
+      - "1025"
