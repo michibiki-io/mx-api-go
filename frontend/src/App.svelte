@@ -509,7 +509,7 @@
                     </div>
                   </div>
                 </div>
-                <Button color="alternative" disabled={me?.authDisabled || mailServerChecking} onclick={loadMailServerCheck}>
+                <Button class="gap-2" color="alternative" disabled={me?.authDisabled || mailServerChecking} onclick={loadMailServerCheck}>
                   <Icon icon="mdi:refresh" class={`h-4 w-4 ${mailServerChecking ? 'animate-spin' : ''}`} />
                   <span>{mailServerChecking ? 'Checking' : 'Check now'}</span>
                 </Button>
