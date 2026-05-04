@@ -105,7 +105,11 @@ Return whether a writable data volume is needed.
 */}}
 {{- define "mx-api-go.dataVolumeEnabled" -}}
 {{- $storageType := lower (default "sqlite" (index .Values.config "MX_API_AUDIT_STORAGE_TYPE")) -}}
-{{- if or .Values.persistence.enabled (eq $storageType "sqlite") -}}
+{{- $driver := lower (default $storageType (index .Values.config "DB_DRIVER")) -}}
+{{- if eq $driver "postgresql" -}}
+{{- $driver = "postgres" -}}
+{{- end -}}
+{{- if eq $driver "sqlite" -}}
 true
 {{- else -}}
 false
@@ -120,6 +124,22 @@ Return the writable data mount path.
 {{- end -}}
 
 {{/*
+Return a SQLite DSN from the legacy audit storage path.
+*/}}
+{{- define "mx-api-go.sqliteDSN" -}}
+{{- $path := trim (default "/var/lib/mx-api/audit.db" .) -}}
+{{- if eq $path "" -}}
+file:/var/lib/mx-api/audit.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000
+{{- else if hasPrefix "file:" $path -}}
+{{- $path -}}
+{{- else if eq $path ":memory:" -}}
+file::memory:?cache=shared
+{{- else -}}
+{{- printf "file:%s?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000" $path -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render a generated baseline config.yaml when configFile.data is empty.
 Environment variables from .Values.config still override these values at runtime.
 */}}
@@ -130,6 +150,13 @@ Environment variables from .Values.config still override these values at runtime
 {{- $contextPath := include "mx-api-go.contextPath" . -}}
 {{- $adminBasePath := default "/admin" (index .Values.config "MX_API_ADMIN_BASE_PATH") -}}
 {{- $auditPath := default "/var/lib/mx-api/audit.db" (index .Values.config "MX_API_AUDIT_SQLITE_PATH") -}}
+{{- $sqliteDSN := include "mx-api-go.sqliteDSN" $auditPath -}}
+{{- $dbDriver := default (default "sqlite" (index .Values.config "MX_API_AUDIT_STORAGE_TYPE")) (index .Values.config "DB_DRIVER") -}}
+{{- $dbDSNDefault := "" -}}
+{{- if eq (lower $dbDriver) "sqlite" -}}
+{{- $dbDSNDefault = $sqliteDSN -}}
+{{- end -}}
+{{- $dbDSN := default $dbDSNDefault (index .Values.config "DB_DSN") -}}
 server:
   context_path: {{ $contextPath | quote }}
   port: 8080
@@ -160,8 +187,26 @@ admin:
     allowed_users: []
     allowed_groups:
       - "mx-api-admins"
+database:
+  driver: {{ $dbDriver | quote }}
+  dsn: {{ $dbDSN | quote }}
+  max_open_conns: {{ default "20" (index .Values.config "DB_MAX_OPEN_CONNS") }}
+  max_idle_conns: {{ default "10" (index .Values.config "DB_MAX_IDLE_CONNS") }}
+  conn_max_lifetime: {{ default "30m" (index .Values.config "DB_CONN_MAX_LIFETIME") }}
+  conn_max_idle_time: {{ default "5m" (index .Values.config "DB_CONN_MAX_IDLE_TIME") }}
 audit:
   enabled: true
+  async:
+    enabled: {{ eq (lower (default "true" (index .Values.config "AUDIT_ASYNC_ENABLED"))) "true" }}
+    channel_size: {{ default "10000" (index .Values.config "AUDIT_CHANNEL_SIZE") }}
+    batch_size: {{ default "500" (index .Values.config "AUDIT_BATCH_SIZE") }}
+    flush_interval: {{ default "100ms" (index .Values.config "AUDIT_FLUSH_INTERVAL") }}
+    shutdown_flush_timeout: {{ default "5s" (index .Values.config "AUDIT_SHUTDOWN_FLUSH_TIMEOUT") }}
+    drop_on_full: {{ eq (lower (default "false" (index .Values.config "AUDIT_DROP_ON_FULL"))) "true" }}
+    retry_max_attempts: {{ default "3" (index .Values.config "AUDIT_RETRY_MAX_ATTEMPTS") }}
+    retry_initial_backoff: {{ default "100ms" (index .Values.config "AUDIT_RETRY_INITIAL_BACKOFF") }}
+    retry_max_backoff: {{ default "2s" (index .Values.config "AUDIT_RETRY_MAX_BACKOFF") }}
+    enqueue_timeout: {{ default "1s" (index .Values.config "AUDIT_ENQUEUE_TIMEOUT") }}
   storage:
     type: {{ default "sqlite" (index .Values.config "MX_API_AUDIT_STORAGE_TYPE") | quote }}
     path: {{ $auditPath | quote }}

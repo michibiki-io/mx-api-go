@@ -4,6 +4,9 @@
 {{- else -}}
 {{- $_ := unset $config "MX_API_CONFIG" -}}
 {{- end -}}
+{{- if eq (default "" (get $config "DB_DSN")) "" -}}
+{{- $_ := unset $config "DB_DSN" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
