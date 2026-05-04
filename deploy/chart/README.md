@@ -1,6 +1,6 @@
 # mx-api-go Helm Chart
 
-This chart installs the `mx-api-go` microservice for contact-form validation and sendmail delivery, including optional admin dashboard and SQLite-backed audit logging.
+This chart installs the `mx-api-go` microservice for contact-form validation and sendmail delivery, including optional admin dashboard and Bun-backed audit logging for SQLite, PostgreSQL, and MariaDB/MySQL.
 
 ## Prerequisites
 
@@ -82,10 +82,61 @@ helm upgrade --install mx-api ./deploy/chart \
   --create-namespace \
   --set persistence.enabled=true \
   --set persistence.size=5Gi \
+  --set-string config.DB_DRIVER=sqlite \
   --set config.MX_API_AUDIT_SQLITE_PATH=/var/lib/mx-api/audit.db
 ```
 
-If `MX_API_AUDIT_STORAGE_TYPE=sqlite`, keep the default single-replica deployment unless you redesign storage for shared access. Persist `/var/lib/mx-api` when audit history must survive pod restarts.
+If `DB_DRIVER=sqlite`, keep the default single-replica deployment unless you redesign storage for shared access. Persist `/var/lib/mx-api` when audit history must survive pod restarts. `DB_DSN` defaults to an SQLite DSN derived from `MX_API_AUDIT_SQLITE_PATH`, so existing SQLite installs can continue setting only the legacy path value.
+
+When `DB_DRIVER` is not `sqlite`, the chart does not create or mount the audit data volume.
+
+### PostgreSQL Audit Log Backend
+
+```bash
+helm upgrade --install mx-api ./deploy/chart \
+  --namespace mx-api \
+  --create-namespace \
+  --set persistence.enabled=false \
+  --set-string config.DB_DRIVER=postgres \
+  --set-string secrets.DB_DSN='postgres://user:password@postgresql:5432/mx_api?sslmode=disable' \
+  --set-string config.DB_MAX_OPEN_CONNS=20 \
+  --set-string config.DB_MAX_IDLE_CONNS=10 \
+  --set-string config.DB_CONN_MAX_LIFETIME=30m \
+  --set-string config.DB_CONN_MAX_IDLE_TIME=5m
+```
+
+Use `--set-string secrets.DB_DSN='...'` or an `existingSecret` containing `DB_DSN` for production database credentials. Values under `config` are rendered into a ConfigMap.
+
+### MariaDB / MySQL Audit Log Backend
+
+```bash
+helm upgrade --install mx-api ./deploy/chart \
+  --namespace mx-api \
+  --create-namespace \
+  --set persistence.enabled=false \
+  --set-string config.DB_DRIVER=mariadb \
+  --set-string secrets.DB_DSN='user:password@tcp(mariadb:3306)/mx_api?parseTime=true&charset=utf8mb4&loc=UTC'
+```
+
+### Async Audit Recorder
+
+```bash
+helm upgrade --install mx-api ./deploy/chart \
+  --namespace mx-api \
+  --create-namespace \
+  --set-string config.AUDIT_ASYNC_ENABLED=true \
+  --set-string config.AUDIT_CHANNEL_SIZE=10000 \
+  --set-string config.AUDIT_BATCH_SIZE=500 \
+  --set-string config.AUDIT_FLUSH_INTERVAL=100ms \
+  --set-string config.AUDIT_SHUTDOWN_FLUSH_TIMEOUT=5s \
+  --set-string config.AUDIT_DROP_ON_FULL=false \
+  --set-string config.AUDIT_RETRY_MAX_ATTEMPTS=3 \
+  --set-string config.AUDIT_RETRY_INITIAL_BACKOFF=100ms \
+  --set-string config.AUDIT_RETRY_MAX_BACKOFF=2s \
+  --set-string config.AUDIT_ENQUEUE_TIMEOUT=1s
+```
+
+The Kubernetes default `terminationGracePeriodSeconds` is normally enough for the default `AUDIT_SHUTDOWN_FLUSH_TIMEOUT=5s`. Increase the pod grace period outside this chart if you set a larger shutdown flush timeout.
 
 ### Admin Dashboard with Header Auth
 
@@ -115,7 +166,7 @@ When `MX_API_ADMIN_AUTH_MODE=none`, protect the dashboard with an upstream contr
 
 ## Config File vs Environment Variables
 
-- `secrets` and `existingSecret` are used only for sensitive values such as `SMTP_CLIENT_USERNAME` and `SMTP_CLIENT_PASSWORD`.
+- `secrets` and `existingSecret` are used for sensitive environment values such as `SMTP_CLIENT_USERNAME`, `SMTP_CLIENT_PASSWORD`, and credential-bearing `DB_DSN` values.
 - `config` is rendered to a `ConfigMap` and injected with `envFrom`.
 - `configFile.enabled=true` also mounts `config.yaml` at `/etc/mx-api/config.yaml`.
 - `configFile.data={}` renders a generated baseline YAML derived from `configs/config.example.yaml`.
@@ -136,6 +187,8 @@ oras repo tags ghcr.io/michibiki-io/charts/mx-api-go
 - `config.CONTEXT_PATH`: public base path such as `/contact`
 - `config.SMTP_*`: SMTP server address, auth toggle, TLS mode, and certificate behavior
 - `config.MX_API_ADMIN_*`: admin dashboard and auth behavior
-- `config.MX_API_AUDIT_*`: audit log enablement, backend type, and retention
-- `secrets.*` or `existingSecret`: SMTP credentials
+- `config.MX_API_AUDIT_*`: audit log enablement, legacy SQLite path, and retention
+- `config.DB_*`: audit database driver, DSN, and connection pool tuning
+- `config.AUDIT_*`: async audit recorder queue, batch, retry, and shutdown flush tuning
+- `secrets.*` or `existingSecret`: SMTP credentials and optional secret-backed `DB_DSN`
 - `configFile.*`: mounted YAML config generation or override
