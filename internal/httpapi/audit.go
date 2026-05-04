@@ -28,6 +28,9 @@ func (h *Handler) auditPublicAPI() gin.HandlerFunc {
 		if !h.cfg.Audit.Enabled {
 			return
 		}
+		if c.Request.Method == http.MethodOptions {
+			return
+		}
 		event := h.eventFromRequest(c, start)
 		event.Action = publicAction(c.Request.Method, c.FullPath())
 		event.Actor = "public"

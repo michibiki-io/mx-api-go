@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadAppliesLegacyRequiredFieldsFromEnv(t *testing.T) {
@@ -263,6 +264,21 @@ func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	t.Setenv("MX_API_AUDIT_STORAGE_TYPE", "sqlite")
 	t.Setenv("MX_API_AUDIT_SQLITE_PATH", "/tmp/test-audit.db")
 	t.Setenv("MX_API_AUDIT_RETENTION_DAYS", "7")
+	t.Setenv("AUDIT_ASYNC_ENABLED", "true")
+	t.Setenv("AUDIT_CHANNEL_SIZE", "1234")
+	t.Setenv("AUDIT_BATCH_SIZE", "321")
+	t.Setenv("AUDIT_FLUSH_INTERVAL", "250ms")
+	t.Setenv("AUDIT_SHUTDOWN_FLUSH_TIMEOUT", "9s")
+	t.Setenv("AUDIT_DROP_ON_FULL", "true")
+	t.Setenv("AUDIT_RETRY_MAX_ATTEMPTS", "5")
+	t.Setenv("AUDIT_RETRY_INITIAL_BACKOFF", "150ms")
+	t.Setenv("AUDIT_RETRY_MAX_BACKOFF", "3s")
+	t.Setenv("DB_DRIVER", "postgres")
+	t.Setenv("DB_DSN", "postgres://user:pass@localhost:5432/app?sslmode=disable")
+	t.Setenv("DB_MAX_OPEN_CONNS", "30")
+	t.Setenv("DB_MAX_IDLE_CONNS", "11")
+	t.Setenv("DB_CONN_MAX_LIFETIME", "45m")
+	t.Setenv("DB_CONN_MAX_IDLE_TIME", "6m")
 	t.Setenv("MX_API_RATE_LIMIT_ENABLED", "false")
 	t.Setenv("MX_API_RATE_LIMIT_REQUESTS_PER_MINUTE", "11")
 	t.Setenv("MX_API_RATE_LIMIT_FAILURE_REQUESTS_PER_MINUTE", "3")
@@ -294,11 +310,34 @@ func TestLoadAppliesAdminAndAuditEnvironment(t *testing.T) {
 	if cfg.Audit.Enabled || cfg.Audit.Storage.Path != "/tmp/test-audit.db" || cfg.Audit.RetentionDays != 7 {
 		t.Fatalf("audit env not applied: %#v", cfg.Audit)
 	}
+	if !cfg.Audit.Async.Enabled || cfg.Audit.Async.ChannelSize != 1234 || cfg.Audit.Async.BatchSize != 321 || cfg.Audit.Async.FlushInterval != 250*time.Millisecond || cfg.Audit.Async.ShutdownFlushTimeout != 9*time.Second || !cfg.Audit.Async.DropOnFull || cfg.Audit.Async.RetryMaxAttempts != 5 || cfg.Audit.Async.RetryInitialBackoff != 150*time.Millisecond || cfg.Audit.Async.RetryMaxBackoff != 3*time.Second {
+		t.Fatalf("audit async env not applied: %#v", cfg.Audit.Async)
+	}
+	if cfg.Database.Driver != "postgres" || cfg.Database.DSN != "postgres://user:pass@localhost:5432/app?sslmode=disable" || cfg.Database.MaxOpenConns != 30 || cfg.Database.MaxIdleConns != 11 || cfg.Database.ConnMaxLifetime != 45*time.Minute || cfg.Database.ConnMaxIdleTime != 6*time.Minute {
+		t.Fatalf("database env not applied: %#v", cfg.Database)
+	}
 	if cfg.Security.RateLimit.Enabled || cfg.Security.RateLimit.RequestsPerMinute != 11 || cfg.Security.RateLimit.FailureRequestsPerMinute != 3 {
 		t.Fatalf("rate limit env not applied: %#v", cfg.Security.RateLimit)
 	}
 	if cfg.Security.Idempotency.Enabled || cfg.Security.Idempotency.TTLSeconds != 120 {
 		t.Fatalf("idempotency env not applied: %#v", cfg.Security.Idempotency)
+	}
+}
+
+func TestLoadUsesAuditSQLitePathWhenDBDSNIsUnset(t *testing.T) {
+	t.Setenv("MX_API_AUDIT_STORAGE_TYPE", "sqlite")
+	t.Setenv("MX_API_AUDIT_SQLITE_PATH", "/var/lib/mx-api/audit.db")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want := "file:/var/lib/mx-api/audit.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000"
+	if cfg.Database.Driver != "sqlite" {
+		t.Fatalf("Database.Driver = %q, want sqlite", cfg.Database.Driver)
+	}
+	if cfg.Database.DSN != want {
+		t.Fatalf("Database.DSN = %q, want %q", cfg.Database.DSN, want)
 	}
 }
 

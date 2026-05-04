@@ -30,8 +30,24 @@ admin:
     allowed_groups:
       - "mx-api-admins"
 
+database:
+  driver: "sqlite"
+  dsn: "file:/var/lib/mx-api/audit.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000"
+  max_open_conns: 1
+  max_idle_conns: 1
+
 audit:
   enabled: true
+  async:
+    enabled: true
+    channel_size: 10000
+    batch_size: 500
+    flush_interval: 100ms
+    shutdown_flush_timeout: 5s
+    drop_on_full: false
+    retry_max_attempts: 3
+    retry_initial_backoff: 100ms
+    retry_max_backoff: 2s
   storage:
     type: "sqlite"
     path: "/var/lib/mx-api/audit.db"

@@ -65,7 +65,7 @@
   let me: AdminMe | null = null;
   let metrics: MetricsResponse | null = null;
   let auditOptions: AuditOptions = { actions: [], endpoints: [], results: [] };
-  let page: AuditPage = { items: [], total: 0, nextCursor: null };
+  let page: AuditPage = { items: [], total: 0, nextCursor: null, hasNext: false };
   let activeView: ActiveView = 'dashboard';
   let selected: AuditEvent | null = null;
   let detailOpen = false;
@@ -79,7 +79,10 @@
   let loading = true;
   let error = '';
   let recoverableAuthError = false;
-  let offset = 0;
+  let currentPage = 0;
+  let pageCursors: Array<string | null> = [null];
+  let pageStarts = [0];
+  let lastKnownTotal = 0;
   let filters: AuditFilters = {
     range: '24h',
     from: '',
@@ -101,7 +104,7 @@
   $: validationValues = [summary.validationSuccesses, summary.validationFailures];
   $: mailValues = [summary.mailSendSuccesses, summary.mailSendFailures];
   $: statusClassValues = [summary.count4xx, summary.count5xx];
-  $: publicApiData = doughnutData(['public API success', 'public API failure'], publicApiValues, ['#16a34a', '#dc2626']);
+  $: publicApiData = doughnutData(['business API success', 'business API failure'], publicApiValues, ['#16a34a', '#dc2626']);
   $: validationData = doughnutData(['validation success', 'validation failure'], validationValues, ['#0f766e', '#ea580c']);
   $: mailData = doughnutData(['mail send success', 'mail send failure'], mailValues, ['#2563eb', '#f97316']);
   $: statusClassData = doughnutData(['4xx', '5xx'], statusClassValues, ['#f59e0b', '#7f1d1d']);
@@ -112,7 +115,7 @@
     labels: metrics?.points.map((point) => new Date(point.timestamp).toLocaleString()) ?? [],
     datasets: [
       {
-        label: 'API requests',
+        label: 'Business API requests',
         data: metrics?.points.map((point) => point.count) ?? [],
         borderColor: '#2563eb',
         backgroundColor: 'rgba(37, 99, 235, 0.12)',
@@ -161,7 +164,7 @@
       me = await apiGetWithAuthRecovery<AdminMe>('/me');
       auditOptions = await apiGetWithAuthRecovery<AuditOptions>('/audit-options');
       await loadMetrics(true);
-      await loadAudit(0, true);
+      await loadAuditPage(0, true, true);
       if (!me.authDisabled) {
         void loadMailServerCheck();
       }
@@ -187,18 +190,24 @@
       : await apiGet<MetricsResponse>('/request-metrics', params);
   }
 
-  async function loadAudit(nextOffset: number, withAuthRecovery = false) {
-    offset = Math.max(0, nextOffset);
-    const params = auditParams(filters, pageSize, offset);
-    page = withAuthRecovery ? await apiGetWithAuthRecovery<AuditPage>('/audit-events', params) : await apiGet<AuditPage>('/audit-events', params);
+  async function loadAuditPage(pageIndex: number, withAuthRecovery = false, includeTotal = false) {
+    currentPage = Math.max(0, pageIndex);
+    const cursor = pageCursors[currentPage] ?? null;
+    const params = auditParams(filters, pageSize, cursor, includeTotal);
+    const nextPage = withAuthRecovery ? await apiGetWithAuthRecovery<AuditPage>('/audit-events', params) : await apiGet<AuditPage>('/audit-events', params);
+    page = { ...nextPage, total: nextPage.total ?? lastKnownTotal };
+    if (typeof nextPage.total === 'number') {
+      lastKnownTotal = nextPage.total;
+    }
   }
 
   async function applyFilters() {
     error = '';
     recoverableAuthError = false;
     try {
+      resetPagination();
       await loadMetrics();
-      await loadAudit(0);
+      await loadAuditPage(0, false, true);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to apply filters';
     }
@@ -277,6 +286,27 @@
     filters = { ...filters, from: '', to: '', pageSize: '25', actor: '', action: '', endpoint: '', path: '', method: '', result: '', statusCode: '', requestId: '' };
   }
 
+  function resetPagination() {
+    currentPage = 0;
+    pageCursors = [null];
+    pageStarts = [0];
+    lastKnownTotal = 0;
+    page = { items: [], total: 0, nextCursor: null, hasNext: false };
+  }
+
+  async function loadNextPage() {
+    if (!page.nextCursor) return;
+    const nextIndex = currentPage + 1;
+    pageCursors = [...pageCursors.slice(0, nextIndex), page.nextCursor];
+    pageStarts = [...pageStarts.slice(0, nextIndex), pageStarts[currentPage] + page.items.length];
+    await loadAuditPage(nextIndex);
+  }
+
+  async function loadPreviousPage() {
+    if (currentPage === 0) return;
+    await loadAuditPage(currentPage - 1);
+  }
+
   function refreshAuthentication() {
     window.location.reload();
   }
@@ -344,6 +374,7 @@
       });
       resetOpen = false;
       resetFilters();
+      resetPagination();
       await reloadAll();
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to reset audit log';
@@ -436,7 +467,7 @@
           {#if activeView === 'dashboard'}
             <section class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 class="text-sm font-semibold text-slate-700">Public API request result</h2>
+                <h2 class="text-sm font-semibold text-slate-700">Business API request result</h2>
                 <div class="mt-3 h-56">
                   {#if hasCounts(publicApiValues)}
                     <Doughnut data={publicApiData} options={doughnutOptions} />
@@ -519,8 +550,8 @@
             <section class="w-full rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
               <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <h2 class="text-lg font-semibold">Request trend</h2>
-                  <p class="text-sm text-slate-500">Request volume over the selected time range</p>
+                  <h2 class="text-lg font-semibold">Business API trend</h2>
+                  <p class="text-sm text-slate-500">Validation and sendmail volume over the selected time range</p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                   {#each ranges as range}
@@ -678,10 +709,10 @@
       </div>
 
       <div class="flex items-center justify-between px-5 pb-5 pt-3 text-sm">
-        <span>Showing {page.items.length ? offset + 1 : 0}-{offset + page.items.length} of {page.total}</span>
+        <span>Showing {page.items.length ? pageStarts[currentPage] + 1 : 0}-{pageStarts[currentPage] + page.items.length} of {page.total ?? lastKnownTotal}</span>
         <div class="flex gap-2">
-          <Button size="sm" color="alternative" disabled={offset === 0} onclick={() => loadAudit(Math.max(0, offset - pageSize))}>Previous</Button>
-          <Button size="sm" color="alternative" disabled={page.nextCursor === null} onclick={() => loadAudit(page.nextCursor ?? offset)}>Next</Button>
+          <Button size="sm" color="alternative" disabled={currentPage === 0} onclick={loadPreviousPage}>Previous</Button>
+          <Button size="sm" color="alternative" disabled={!page.hasNext || page.nextCursor === null} onclick={loadNextPage}>Next</Button>
         </div>
       </div>
             </section>
@@ -695,7 +726,7 @@
 <Modal bind:open={detailOpen} title="Audit event detail" size="lg">
   {#if selected}
     <div class="grid gap-3 text-sm sm:grid-cols-2">
-      <Detail label="ID" value={selected.id} />
+      <Detail label="ID" value={String(selected.id)} />
       <Detail label="Timestamp" value={fmtEventTime(selected)} />
       <Detail label="Actor" value={selected.actor} />
       <Detail label="Actor source" value={selected.actorSource} />
