@@ -22,6 +22,7 @@ type Config struct {
 	Server     ServerConfig              `yaml:"server" json:"server"`
 	Security   SecurityConfig            `yaml:"security" json:"security"`
 	Admin      AdminConfig               `yaml:"admin" json:"admin"`
+	Database   DatabaseConfig            `yaml:"database" json:"database"`
 	Audit      AuditConfig               `yaml:"audit" json:"audit"`
 	SMTP       SMTPConfig                `yaml:"smtp" json:"-"`
 	Mail       MailConfig                `yaml:"mail" json:"mail"`
@@ -83,12 +84,35 @@ type AdminAuthConfig struct {
 type AuditConfig struct {
 	Enabled       bool               `yaml:"enabled" json:"enabled"`
 	Storage       AuditStorageConfig `yaml:"storage" json:"storage"`
+	Async         AuditAsyncConfig   `yaml:"async" json:"async"`
 	RetentionDays int                `yaml:"retention_days" json:"retentionDays"`
 }
 
 type AuditStorageConfig struct {
 	Type string `yaml:"type" json:"type"`
 	Path string `yaml:"path" json:"path"`
+}
+
+type DatabaseConfig struct {
+	Driver          string        `yaml:"driver" json:"driver"`
+	DSN             string        `yaml:"dsn" json:"dsn"`
+	MaxOpenConns    int           `yaml:"max_open_conns" json:"maxOpenConns"`
+	MaxIdleConns    int           `yaml:"max_idle_conns" json:"maxIdleConns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" json:"-"`
+	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time" json:"-"`
+}
+
+type AuditAsyncConfig struct {
+	Enabled              bool          `yaml:"enabled" json:"enabled"`
+	ChannelSize          int           `yaml:"channel_size" json:"channelSize"`
+	BatchSize            int           `yaml:"batch_size" json:"batchSize"`
+	FlushInterval        time.Duration `yaml:"flush_interval" json:"-"`
+	ShutdownFlushTimeout time.Duration `yaml:"shutdown_flush_timeout" json:"-"`
+	DropOnFull           bool          `yaml:"drop_on_full" json:"dropOnFull"`
+	RetryMaxAttempts     int           `yaml:"retry_max_attempts" json:"retryMaxAttempts"`
+	RetryInitialBackoff  time.Duration `yaml:"retry_initial_backoff" json:"-"`
+	RetryMaxBackoff      time.Duration `yaml:"retry_max_backoff" json:"-"`
+	EnqueueTimeout       time.Duration `yaml:"enqueue_timeout" json:"-"`
 }
 
 type SMTPConfig struct {
@@ -214,11 +238,31 @@ func Default() *Config {
 				AllowedGroups: []string{"mx-api-admins"},
 			},
 		},
+		Database: DatabaseConfig{
+			Driver:          "sqlite",
+			DSN:             "file:/tmp/mx-api-audit.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000",
+			MaxOpenConns:    20,
+			MaxIdleConns:    10,
+			ConnMaxLifetime: 30 * time.Minute,
+			ConnMaxIdleTime: 5 * time.Minute,
+		},
 		Audit: AuditConfig{
 			Enabled: true,
 			Storage: AuditStorageConfig{
 				Type: "sqlite",
 				Path: "/tmp/mx-api-audit.db",
+			},
+			Async: AuditAsyncConfig{
+				Enabled:              true,
+				ChannelSize:          10000,
+				BatchSize:            500,
+				FlushInterval:        100 * time.Millisecond,
+				ShutdownFlushTimeout: 5 * time.Second,
+				DropOnFull:           false,
+				RetryMaxAttempts:     3,
+				RetryInitialBackoff:  100 * time.Millisecond,
+				RetryMaxBackoff:      2 * time.Second,
+				EnqueueTimeout:       time.Second,
 			},
 			RetentionDays: 90,
 		},
@@ -479,6 +523,9 @@ func isNullNode(node *yaml.Node) bool {
 }
 
 func applyEnv(cfg *Config) {
+	auditSQLitePathSet := os.Getenv("MX_API_AUDIT_SQLITE_PATH") != ""
+	dbDSNSet := os.Getenv("DB_DSN") != ""
+
 	setString(&cfg.Server.ContextPath, "CONTEXT_PATH")
 	setString(&cfg.Server.Mode, "MODE")
 	setInt(&cfg.Server.Port, "BIND_PORT")
@@ -511,6 +558,32 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.Audit.Storage.Type, "MX_API_AUDIT_STORAGE_TYPE")
 	setString(&cfg.Audit.Storage.Path, "MX_API_AUDIT_SQLITE_PATH")
 	setInt(&cfg.Audit.RetentionDays, "MX_API_AUDIT_RETENTION_DAYS")
+	setBool(&cfg.Audit.Async.Enabled, "AUDIT_ASYNC_ENABLED")
+	setInt(&cfg.Audit.Async.ChannelSize, "AUDIT_CHANNEL_SIZE")
+	setInt(&cfg.Audit.Async.BatchSize, "AUDIT_BATCH_SIZE")
+	setDuration(&cfg.Audit.Async.FlushInterval, "AUDIT_FLUSH_INTERVAL")
+	setDuration(&cfg.Audit.Async.ShutdownFlushTimeout, "AUDIT_SHUTDOWN_FLUSH_TIMEOUT")
+	setBool(&cfg.Audit.Async.DropOnFull, "AUDIT_DROP_ON_FULL")
+	setInt(&cfg.Audit.Async.RetryMaxAttempts, "AUDIT_RETRY_MAX_ATTEMPTS")
+	setDuration(&cfg.Audit.Async.RetryInitialBackoff, "AUDIT_RETRY_INITIAL_BACKOFF")
+	setDuration(&cfg.Audit.Async.RetryMaxBackoff, "AUDIT_RETRY_MAX_BACKOFF")
+	setDuration(&cfg.Audit.Async.EnqueueTimeout, "AUDIT_ENQUEUE_TIMEOUT")
+
+	setString(&cfg.Database.Driver, "DB_DRIVER")
+	setString(&cfg.Database.DSN, "DB_DSN")
+	setInt(&cfg.Database.MaxOpenConns, "DB_MAX_OPEN_CONNS")
+	setInt(&cfg.Database.MaxIdleConns, "DB_MAX_IDLE_CONNS")
+	setDuration(&cfg.Database.ConnMaxLifetime, "DB_CONN_MAX_LIFETIME")
+	setDuration(&cfg.Database.ConnMaxIdleTime, "DB_CONN_MAX_IDLE_TIME")
+	if auditSQLitePathSet && !dbDSNSet {
+		driver := strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
+		if driver == "" {
+			driver = strings.ToLower(strings.TrimSpace(cfg.Audit.Storage.Type))
+		}
+		if driver == "" || driver == "sqlite" {
+			cfg.Database.DSN = sqliteDSN(cfg.Audit.Storage.Path)
+		}
+	}
 
 	setString(&cfg.SMTP.ServerAddr, "SMTP_SERVER_ADDR")
 	setBool(&cfg.SMTP.AuthenticationEnabled, "SMTP_AUTHENTICATION_ENABLED")
@@ -581,6 +654,59 @@ func normalize(cfg *Config) {
 	}
 	if cfg.Audit.RetentionDays < 0 {
 		cfg.Audit.RetentionDays = 0
+	}
+	if strings.TrimSpace(cfg.Database.Driver) == "" {
+		cfg.Database.Driver = cfg.Audit.Storage.Type
+	}
+	cfg.Database.Driver = strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
+	if cfg.Database.Driver == "postgresql" {
+		cfg.Database.Driver = "postgres"
+	}
+	if strings.TrimSpace(cfg.Database.DSN) == "" && cfg.Database.Driver == "sqlite" {
+		cfg.Database.DSN = sqliteDSN(cfg.Audit.Storage.Path)
+	}
+	if cfg.Database.Driver == "sqlite" {
+		cfg.Database.MaxOpenConns = 1
+		cfg.Database.MaxIdleConns = 1
+		cfg.Database.ConnMaxLifetime = 0
+		cfg.Database.ConnMaxIdleTime = 0
+	} else {
+		if cfg.Database.MaxOpenConns <= 0 {
+			cfg.Database.MaxOpenConns = 20
+		}
+		if cfg.Database.MaxIdleConns <= 0 {
+			cfg.Database.MaxIdleConns = 10
+		}
+		if cfg.Database.ConnMaxLifetime <= 0 {
+			cfg.Database.ConnMaxLifetime = 30 * time.Minute
+		}
+		if cfg.Database.ConnMaxIdleTime <= 0 {
+			cfg.Database.ConnMaxIdleTime = 5 * time.Minute
+		}
+	}
+	if cfg.Audit.Async.ChannelSize <= 0 {
+		cfg.Audit.Async.ChannelSize = 10000
+	}
+	if cfg.Audit.Async.BatchSize <= 0 {
+		cfg.Audit.Async.BatchSize = 500
+	}
+	if cfg.Audit.Async.FlushInterval <= 0 {
+		cfg.Audit.Async.FlushInterval = 100 * time.Millisecond
+	}
+	if cfg.Audit.Async.ShutdownFlushTimeout <= 0 {
+		cfg.Audit.Async.ShutdownFlushTimeout = 5 * time.Second
+	}
+	if cfg.Audit.Async.RetryMaxAttempts <= 0 {
+		cfg.Audit.Async.RetryMaxAttempts = 3
+	}
+	if cfg.Audit.Async.RetryInitialBackoff <= 0 {
+		cfg.Audit.Async.RetryInitialBackoff = 100 * time.Millisecond
+	}
+	if cfg.Audit.Async.RetryMaxBackoff <= 0 {
+		cfg.Audit.Async.RetryMaxBackoff = 2 * time.Second
+	}
+	if cfg.Audit.Async.EnqueueTimeout <= 0 {
+		cfg.Audit.Async.EnqueueTimeout = time.Second
 	}
 	if cfg.SMTP.TLSMode == "" {
 		cfg.SMTP.TLSMode = "implicit"
@@ -712,6 +838,14 @@ func setBool(target *bool, key string) {
 	}
 }
 
+func setDuration(target *time.Duration, key string) {
+	if v := os.Getenv(key); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			*target = parsed
+		}
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -719,6 +853,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func sqliteDSN(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = "/tmp/mx-api-audit.db"
+	}
+	if strings.HasPrefix(path, "file:") {
+		return path
+	}
+	if path == ":memory:" {
+		return "file::memory:?cache=shared"
+	}
+	return "file:" + path + "?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000"
 }
 
 func fileExists(path string) bool {

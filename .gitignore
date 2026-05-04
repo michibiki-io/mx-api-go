@@ -39,3 +39,6 @@ coverage.out
 .vscode/
 tmp/
 .tmp/
+
+# cache
+**/.cache/**

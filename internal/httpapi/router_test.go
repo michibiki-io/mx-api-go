@@ -15,6 +15,7 @@ import (
 
 	"github.com/michibiki-io/mx-api-go/internal/audit"
 	"github.com/michibiki-io/mx-api-go/internal/config"
+	"github.com/michibiki-io/mx-api-go/internal/infrastructure/database"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
 	"github.com/michibiki-io/mx-api-go/internal/requestvalidator"
 	"go.uber.org/zap"
@@ -61,7 +62,10 @@ func testRouterWithAudit(t *testing.T, cfg *config.Config, sender *fakeSender) (
 	if err := os.WriteFile(cfg.Mail.TemplatePath, []byte("Hello {{ name }}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store, err := audit.Open(context.Background(), filepath.Join(t.TempDir(), "audit.db"))
+	cfg.Database.Driver = "sqlite"
+	cfg.Database.DSN = "file:" + filepath.Join(t.TempDir(), "audit.db") + "?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000"
+	cfg.Audit.Async.Enabled = false
+	store, err := database.OpenAuditStore(context.Background(), cfg, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,6 +393,28 @@ func TestAuditLoggingRecordsPublicAPIWithoutSensitiveData(t *testing.T) {
 	}
 }
 
+func TestAuditLoggingSkipsCORSPreflight(t *testing.T) {
+	cfg := config.Default()
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/validate", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Referer", "http://localhost:5173/")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	page, err := store.List(context.Background(), audit.Filter{Limit: 10})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if page.Total != 0 {
+		t.Fatalf("preflight audit total = %d, want 0", page.Total)
+	}
+}
+
 func TestAdminHeaderAuthAllowAndDeny(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.AllowedGroups = []string{"mx-api-admins"}
@@ -536,7 +562,11 @@ func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/audit-events?action=mail.send&limit=1&offset=1", nil)
+	firstPage, err := store.List(context.Background(), audit.Filter{Action: "mail.send", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/audit-events?action=mail.send&limit=1&cursor="+firstPage.NextCursor, nil)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
@@ -549,7 +579,9 @@ func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 			audit.Event
 			TimestampDisplay string `json:"timestampDisplay"`
 		} `json:"items"`
-		Total int `json:"total"`
+		Total      int    `json:"total"`
+		HasNext    bool   `json:"hasNext"`
+		NextCursor string `json:"nextCursor"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal body: %v", err)

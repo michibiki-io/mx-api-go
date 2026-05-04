@@ -158,7 +158,7 @@ SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SM
 
 `mx-api` can serve a lightweight administrator dashboard at `admin.dashboard.base_path` (default: `/admin`). The dashboard contains API/validation/mail/status doughnut charts, a backend mail server connectivity check, an API request trend chart, server-side audit log filters, pagination, a row detail modal, and a guarded audit-log reset dialog.
 
-The dashboard is designed for operational visibility: administrators can scan request health from the top charts, check whether the configured SMTP server is reachable and accepts authentication, inspect traffic trends, and then drill into individual audit events with filters and pagination. The backend mail server check is available only when admin authentication mode is `header`; it is disabled when admin auth mode is `none`.
+The dashboard is designed for operational visibility: administrators can scan business API health from the top charts, check whether the configured SMTP server is reachable and accepts authentication, inspect validation/sendmail traffic trends, and then drill into individual audit events with filters and pagination. The backend mail server check is available only when admin authentication mode is `header`; it is disabled when admin auth mode is `none`.
 
 Dashboard view:
 
@@ -168,9 +168,15 @@ Audit log view:
 
 ![mx-api admin audit log](docs/images/admin-audit-log.png)
 
-Audit events are stored in SQLite when `audit.enabled` is true. The default embedded config uses `/var/lib/mx-api/audit.db`; persist that directory in containers or Kubernetes when audit history must survive restarts. `audit.retention_days` deletes older events at startup when the value is greater than zero.
+Audit events are stored through a Bun-backed repository when `audit.enabled` is true. Supported backends are SQLite, PostgreSQL, and MariaDB/MySQL. SQLite compatibility is preserved for local development and lightweight deployments; PostgreSQL is the recommended high-performance backend; MariaDB/MySQL is supported for operational compatibility. Existing SQLite audit records are not migrated to the new schema automatically. `audit.retention_days` deletes older events at startup when the value is greater than zero.
 
 ```yaml
+database:
+  driver: "sqlite"
+  dsn: "file:/var/lib/mx-api/audit.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000"
+  max_open_conns: 1
+  max_idle_conns: 1
+
 admin:
   dashboard:
     enabled: true
@@ -187,10 +193,55 @@ admin:
 
 audit:
   enabled: true
+  async:
+    enabled: true
+    channel_size: 10000
+    batch_size: 500
+    flush_interval: 100ms
+    shutdown_flush_timeout: 5s
+    drop_on_full: false
+    retry_max_attempts: 3
+    retry_initial_backoff: 100ms
+    retry_max_backoff: 2s
   storage:
     type: "sqlite"
     path: "/var/lib/mx-api/audit.db"
   retention_days: 90
+```
+
+Environment variable examples:
+
+```env
+DB_DRIVER=postgres
+DB_DSN=postgres://user:password@localhost:5432/app?sslmode=disable
+DB_MAX_OPEN_CONNS=20
+DB_MAX_IDLE_CONNS=10
+DB_CONN_MAX_LIFETIME=30m
+DB_CONN_MAX_IDLE_TIME=5m
+
+AUDIT_ASYNC_ENABLED=true
+AUDIT_CHANNEL_SIZE=10000
+AUDIT_BATCH_SIZE=500
+AUDIT_FLUSH_INTERVAL=100ms
+AUDIT_SHUTDOWN_FLUSH_TIMEOUT=5s
+AUDIT_DROP_ON_FULL=false
+AUDIT_RETRY_MAX_ATTEMPTS=3
+AUDIT_RETRY_INITIAL_BACKOFF=100ms
+AUDIT_RETRY_MAX_BACKOFF=2s
+```
+
+SQLite:
+
+```env
+DB_DRIVER=sqlite
+DB_DSN=file:app.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000
+```
+
+MariaDB / MySQL:
+
+```env
+DB_DRIVER=mariadb
+DB_DSN=user:password@tcp(localhost:3306)/app?parseTime=true&charset=utf8mb4&loc=UTC
 ```
 
 Authentication modes:
@@ -199,6 +250,10 @@ Authentication modes:
 - `none`: `mx-api` performs no dashboard authentication. The UI shows a visible warning banner. This mode must be protected by upstream access control such as ingress auth, reverse-proxy auth, oauth2-proxy, Authelia, VPN-only exposure, or Basic Auth. Do not expose it directly to the public internet.
 
 Audit logging intentionally avoids sensitive data. It records operational metadata such as timestamp, actor, action, method, path, endpoint, result, status code, request ID, duration, remote address, user agent summary, and high-level error code/message. It does not store Authorization headers, cookies, SMTP credentials, raw request bodies, submitted form contents, full mail body, full message text, or secret tokens.
+
+The async recorder uses a bounded channel plus batch inserts. It flushes when the batch size is reached or the flush interval elapses, retries failed batches with exponential backoff, and does not silently drop logs by default. When `AUDIT_DROP_ON_FULL=true`, dropped audit logs are counted and logged. For graceful shutdown, call `recorder.Close(ctx)` or `store.Shutdown(ctx)` and make sure Kubernetes `terminationGracePeriodSeconds` is long enough to drain pending audit logs.
+
+Audit log listing now supports keyset pagination ordered by `created_at DESC, id DESC`. The backend accepts a base64url JSON cursor and still tolerates legacy offset pagination as a compatibility fallback.
 
 Audit log timestamps in the dashboard use Go time layouts. Set `MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT` and optionally `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE` to change the display, for example `2006-01-02 15:04:05 MST` with `Asia/Tokyo`.
 
@@ -454,7 +509,7 @@ server:
 
 `mx-api` は `admin.dashboard.base_path`（デフォルト `/admin`）で軽量な管理者向け dashboard を配信できます。dashboard には API / validation / mail / status の doughnut chart、backend mail server connectivity check、API request trend graph、server-side filter 付き audit log table、pagination、row detail modal、確認付き audit-log reset dialog が含まれます。
 
-dashboard は運用状況を素早く確認するための画面です。上段の chart で request health を把握し、設定済み SMTP server への到達性と認証可否を確認し、request trend を確認したうえで、filter と pagination を使って個別の audit event を調査できます。backend mail server check は admin authentication mode が `header` の場合だけ有効で、`none` では無効です。
+dashboard は運用状況を素早く確認するための画面です。上段の chart では validation / sendmail を業務指標として集計し、設定済み SMTP server への到達性と認証可否を確認し、validation / sendmail の trend を確認したうえで、filter と pagination を使って個別の audit event を調査できます。backend mail server check は admin authentication mode が `header` の場合だけ有効で、`none` では無効です。
 
 Dashboard view:
 
@@ -464,9 +519,15 @@ Audit log view:
 
 ![mx-api admin audit log](docs/images/admin-audit-log.png)
 
-`audit.enabled` が true の場合、監査ログは SQLite に保存されます。埋め込み config の保存先は `/var/lib/mx-api/audit.db` です。container / Kubernetes で監査履歴を restart 後も残す場合は、この directory を永続 volume として mount してください。`audit.retention_days` が 1 以上なら、起動時に指定日数より古い event を削除します。
+`audit.enabled` が true の場合、監査ログは Bun ベースの repository 経由で保存されます。backend は SQLite / PostgreSQL / MariaDB(MySQL) をサポートします。SQLite 互換は維持されており、local development や lightweight deployment に向いています。高負荷運用では PostgreSQL を推奨し、既存の MySQL/MariaDB 運用との互換が必要な場合は MariaDB/MySQL を利用できます。既存 SQLite 監査データの新 schema への migration は自動では行いません。`audit.retention_days` が 1 以上なら、起動時に指定日数より古い event を削除します。
 
 ```yaml
+database:
+  driver: "sqlite"
+  dsn: "file:/var/lib/mx-api/audit.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000"
+  max_open_conns: 1
+  max_idle_conns: 1
+
 admin:
   dashboard:
     enabled: true
@@ -483,10 +544,55 @@ admin:
 
 audit:
   enabled: true
+  async:
+    enabled: true
+    channel_size: 10000
+    batch_size: 500
+    flush_interval: 100ms
+    shutdown_flush_timeout: 5s
+    drop_on_full: false
+    retry_max_attempts: 3
+    retry_initial_backoff: 100ms
+    retry_max_backoff: 2s
   storage:
     type: "sqlite"
     path: "/var/lib/mx-api/audit.db"
   retention_days: 90
+```
+
+環境変数例:
+
+```env
+DB_DRIVER=postgres
+DB_DSN=postgres://user:password@localhost:5432/app?sslmode=disable
+DB_MAX_OPEN_CONNS=20
+DB_MAX_IDLE_CONNS=10
+DB_CONN_MAX_LIFETIME=30m
+DB_CONN_MAX_IDLE_TIME=5m
+
+AUDIT_ASYNC_ENABLED=true
+AUDIT_CHANNEL_SIZE=10000
+AUDIT_BATCH_SIZE=500
+AUDIT_FLUSH_INTERVAL=100ms
+AUDIT_SHUTDOWN_FLUSH_TIMEOUT=5s
+AUDIT_DROP_ON_FULL=false
+AUDIT_RETRY_MAX_ATTEMPTS=3
+AUDIT_RETRY_INITIAL_BACKOFF=100ms
+AUDIT_RETRY_MAX_BACKOFF=2s
+```
+
+SQLite:
+
+```env
+DB_DRIVER=sqlite
+DB_DSN=file:app.db?cache=shared&mode=rwc&_journal_mode=WAL&_busy_timeout=5000
+```
+
+MariaDB / MySQL:
+
+```env
+DB_DRIVER=mariadb
+DB_DSN=user:password@tcp(localhost:3306)/app?parseTime=true&charset=utf8mb4&loc=UTC
 ```
 
 認証モード:
@@ -495,6 +601,10 @@ audit:
 - `none`: `mx-api` は dashboard の認証を行いません。UI には警告 banner が表示されます。この mode は ingress auth、reverse proxy auth、oauth2-proxy、Authelia、VPN-only exposure、Basic Auth など、必ず upstream の access control で保護してください。public internet に直接公開してはいけません。
 
 監査ログは機密情報を保存しない設計です。記録するのは timestamp、actor、action、method、path、endpoint、result、status code、request ID、duration、remote address、user agent summary、高レベルな error code/message などの運用 metadata です。Authorization header、cookie、SMTP credential、raw request body、送信 form 全体、mail body、message text、secret token は保存しません。
+
+async recorder は bounded channel と batch insert を使います。`batch_size` 到達時または `flush_interval` 経過時に flush し、失敗した batch は exponential backoff で retry します。default では監査ログを黙って drop しません。`AUDIT_DROP_ON_FULL=true` のときだけ drop を許可し、その件数を log に残します。graceful shutdown では `recorder.Close(ctx)` または `store.Shutdown(ctx)` を呼び、Kubernetes では pending log を flush できるだけの `terminationGracePeriodSeconds` を確保してください。
+
+audit event list は `created_at DESC, id DESC` の keyset pagination に対応しました。backend は base64url JSON cursor を受け付け、移行期間の互換用として legacy offset pagination も補助的に受け付けます。
 
 dashboard 上の audit log timestamp は Go の time layout で表示します。`MX_API_ADMIN_AUDIT_TIMESTAMP_FORMAT` と、必要に応じて `MX_API_ADMIN_AUDIT_TIMESTAMP_TIMEZONE` を設定してください。例: `2006-01-02 15:04:05 MST` と `Asia/Tokyo`。
 

@@ -33,7 +33,7 @@ type Handler struct {
 type auditReader interface {
 	audit.Recorder
 	List(context.Context, audit.Filter) (audit.Page, error)
-	Get(context.Context, string) (audit.Event, bool, error)
+	Get(context.Context, int64) (audit.Event, bool, error)
 	Summary(context.Context, audit.Filter) (audit.Summary, error)
 	Metrics(context.Context, audit.MetricsFilter) (audit.Metrics, error)
 	Reset(context.Context, audit.Event) error

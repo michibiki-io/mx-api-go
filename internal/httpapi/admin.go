@@ -86,23 +86,37 @@ func (h *Handler) adminAuditEvents(c *gin.Context) {
 		StatusCode:  queryInt(c, "status_code", 0),
 		StatusClass: c.Query("status_class"),
 		RequestID:   c.Query("request_id"),
-		Limit:       queryInt(c, "limit", 50),
+		Limit:       queryInt(c, "limit", 100),
+		Cursor:      c.Query("cursor"),
 		Offset:      queryInt(c, "offset", 0),
+		SkipTotal:   !queryBool(c, "include_total", true),
 	}
 	page, err := h.auditRead.List(c.Request.Context(), filter)
 	if err != nil {
+		if err == audit.ErrInvalidCursor {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid audit cursor"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load audit events"})
 		return
 	}
-	nextOffset := filter.Offset + filter.Limit
-	var nextCursor *int
-	if nextOffset < page.Total {
-		nextCursor = &nextOffset
+	var nextCursor any
+	if filter.Cursor == "" && c.Query("cursor") == "" {
+		if page.HasNext {
+			nextCursor = filter.Offset + len(page.Items)
+		}
+	} else if page.NextCursor != "" {
+		nextCursor = page.NextCursor
 	}
 	h.recordAdminAPI(c, "audit.view", "Admin viewed audit logs")
+	responseTotal := any(nil)
+	if !filter.SkipTotal {
+		responseTotal = page.Total
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"items":      h.auditEventResponses(page.Items),
-		"total":      page.Total,
+		"total":      responseTotal,
+		"hasNext":    page.HasNext,
 		"nextCursor": nextCursor,
 	})
 }
@@ -112,7 +126,12 @@ func (h *Handler) adminAuditEvent(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "audit storage is not available"})
 		return
 	}
-	event, ok, err := h.auditRead.Get(c.Request.Context(), c.Param("id"))
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid audit event id"})
+		return
+	}
+	event, ok, err := h.auditRead.Get(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load audit event"})
 		return
@@ -323,4 +342,16 @@ func queryDuration(c *gin.Context, key string) time.Duration {
 		return parsed
 	}
 	return 0
+}
+
+func queryBool(c *gin.Context, key string, fallback bool) bool {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

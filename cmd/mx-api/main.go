@@ -13,6 +13,7 @@ import (
 	"github.com/michibiki-io/mx-api-go/internal/audit"
 	"github.com/michibiki-io/mx-api-go/internal/config"
 	"github.com/michibiki-io/mx-api-go/internal/httpapi"
+	"github.com/michibiki-io/mx-api-go/internal/infrastructure/database"
 	"github.com/michibiki-io/mx-api-go/internal/logging"
 	"github.com/michibiki-io/mx-api-go/internal/mail"
 	"github.com/michibiki-io/mx-api-go/internal/requestvalidator"
@@ -37,20 +38,17 @@ func main() {
 		logger.Fatal("failed to initialize validator", zap.Error(err))
 	}
 
-	var auditRecorder audit.Recorder = audit.NoopRecorder{}
+	var (
+		auditRecorder audit.Recorder = audit.NoopRecorder{}
+		auditStore    *audit.Store
+	)
 	if cfg.Audit.Enabled {
-		if cfg.Audit.Storage.Type != "sqlite" {
-			logger.Fatal("unsupported audit storage type", zap.String("type", cfg.Audit.Storage.Type))
-		}
-		store, err := audit.Open(context.Background(), cfg.Audit.Storage.Path)
+		store, err := database.OpenAuditStore(context.Background(), cfg, logger)
 		if err != nil {
 			logger.Fatal("failed to initialize audit store", zap.Error(err))
 		}
-		defer store.Close()
+		auditStore = store
 		auditRecorder = store
-		if err := store.PruneRetention(context.Background(), cfg.Audit.RetentionDays); err != nil {
-			logger.Warn("failed to prune audit logs", zap.Error(err))
-		}
 		_ = store.Record(context.Background(), audit.Event{
 			Actor:       "system",
 			ActorSource: "system",
@@ -87,6 +85,13 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", zap.Error(err))
 		return
+	}
+	if auditStore != nil {
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), cfg.Audit.Async.ShutdownFlushTimeout)
+		defer auditCancel()
+		if err := auditStore.Shutdown(auditCtx); err != nil {
+			logger.Error("failed to shut down audit store cleanly", zap.Error(err))
+		}
 	}
 
 	time.Sleep(50 * time.Millisecond)
