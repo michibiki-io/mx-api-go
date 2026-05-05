@@ -120,6 +120,99 @@ func TestValidatePostSuccessUsesOk(t *testing.T) {
 	}
 }
 
+func TestPublicAPIPreflightSuccess(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/validate", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "POST") {
+		t.Fatalf("Access-Control-Allow-Methods = %q, want POST", got)
+	}
+	assertVaryContains(t, rec, "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method")
+}
+
+func TestValidatePostAllowsValidOriginWithoutReferer(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := validRequest(http.MethodPost, "/api/v1/validate")
+	req.Header.Del("Referer")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+}
+
+func TestValidationErrorIncludesCORSForValidOrigin(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/validate", bytes.NewBufferString(`{"name":"","email":"bad","message":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+}
+
+func TestInvalidOriginIsUnauthorized(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := validRequest(http.MethodPost, "/api/v1/validate")
+	req.Header.Set("Origin", "https://attacker.example")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
+	}
+	assertVaryContains(t, rec, "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method")
+}
+
+func TestPublicAPIPreflightReflectsCustomRequestHeaders(t *testing.T) {
+	router := testRouter(t, &fakeSender{})
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/sendmail", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "content-type, x-form-flow, x-client-trace-id")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "content-type, x-form-flow, x-client-trace-id" {
+		t.Fatalf("Access-Control-Allow-Headers = %q", got)
+	}
+	assertVaryContains(t, rec, "Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method")
+}
+
 func TestStatusEndpointIncludesVersion(t *testing.T) {
 	router := testRouter(t, &fakeSender{})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -249,6 +342,9 @@ func TestSendmailIdempotencyKeyRejectsDifferentPayload(t *testing.T) {
 	if conflictRec.Code != http.StatusConflict {
 		t.Fatalf("conflict status = %d, body = %s", conflictRec.Code, conflictRec.Body.String())
 	}
+	if got := conflictRec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
 	if sender.count != 1 {
 		t.Fatalf("sender count = %d, want 1", sender.count)
 	}
@@ -276,6 +372,9 @@ func TestPublicAPIRateLimitRejectsExcessRequests(t *testing.T) {
 	router.ServeHTTP(secondRec, second)
 	if secondRec.Code != http.StatusTooManyRequests {
 		t.Fatalf("second status = %d, body = %s", secondRec.Code, secondRec.Body.String())
+	}
+	if got := secondRec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
 	}
 }
 
@@ -678,4 +777,20 @@ func dashboardTokenFromConfigJS(t *testing.T, router http.Handler) string {
 		t.Fatalf("dashboard token missing in config.js: %s", rec.Body.String())
 	}
 	return matches[1]
+}
+
+func assertVaryContains(t *testing.T, rec *httptest.ResponseRecorder, values ...string) {
+	t.Helper()
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(rec.Header().Get("Vary"), ",") {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" {
+			seen[part] = struct{}{}
+		}
+	}
+	for _, value := range values {
+		if _, ok := seen[strings.ToLower(value)]; !ok {
+			t.Fatalf("Vary = %q, missing %q", rec.Header().Get("Vary"), value)
+		}
+	}
 }
