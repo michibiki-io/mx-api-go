@@ -88,12 +88,10 @@ func (h *Handler) rateLimitPublicAPI() gin.HandlerFunc {
 
 		key := publicRateLimitKey(c)
 		if !h.rateLimiter.Allow(key, h.cfg.Security.RateLimit.RequestsPerMinute) {
-			h.setPublicCORS(c)
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"status": "TooManyRequests"})
 			return
 		}
 		if h.failureRateLimiter.Limited(key, h.cfg.Security.RateLimit.FailureRequestsPerMinute) {
-			h.setPublicCORS(c)
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"status": "TooManyRequests"})
 			return
 		}

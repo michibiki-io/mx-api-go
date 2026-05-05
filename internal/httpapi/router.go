@@ -78,17 +78,16 @@ func NewRouter(cfg *config.Config, validator *requestvalidator.Engine, sender ma
 
 	api := root.Group("/api/v1")
 	api.Use(handler.auditPublicAPI())
-	api.Use(handler.rateLimitPublicAPI())
 	{
 		api.GET("/schema", handler.schema)
 		api.GET("/form-schema", handler.schema)
 
-		validate := api.Group("/validate").Use(handler.allowedOrigin)
+		validate := api.Group("/validate").Use(handler.publicCORS, handler.rateLimitPublicAPI())
 		validate.OPTIONS("", optionStatus)
 		validate.GET("", status("Ok"))
 		validate.POST("", handler.validatePost, status("Ok"))
 
-		sendmail := api.Group("/sendmail").Use(handler.allowedOrigin)
+		sendmail := api.Group("/sendmail").Use(handler.publicCORS, handler.rateLimitPublicAPI())
 		sendmail.OPTIONS("", optionStatus)
 		sendmail.GET("", status("Ok"))
 		sendmail.POST("", handler.validatePost, handler.sendmailPost)
@@ -119,6 +118,6 @@ func status(value string) gin.HandlerFunc {
 }
 
 func optionStatus(c *gin.Context) {
-	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST")
+	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	c.JSON(http.StatusOK, gin.H{"status": "Ok", "version": version.Value()})
 }
