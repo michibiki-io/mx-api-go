@@ -56,7 +56,8 @@ func (h *Handler) sendmailPost(c *gin.Context) {
 		return
 	}
 
-	body, err := mail.RenderTemplate(h.cfg.Mail.TemplatePath, h.templateData(values))
+	homepageURL := h.homepageURLForRequest(c)
+	body, err := mail.RenderTemplate(h.cfg.Mail.TemplatePath, h.templateData(values, homepageURL))
 	if err != nil {
 		h.logger.Warn("failed to render mail template", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -142,11 +143,14 @@ func (h *Handler) valuesFromPayload(payload map[string]any) map[string]string {
 	return values
 }
 
-func (h *Handler) templateData(values map[string]string) map[string]any {
+func (h *Handler) templateData(values map[string]string, homepageURL string) map[string]any {
 	location, err := time.LoadLocation(h.cfg.Mail.Timezone)
 	if err != nil {
 		h.logger.Warn("failed to load configured mail timezone; falling back to UTC", zap.String("timezone", h.cfg.Mail.Timezone), zap.Error(err))
 		location = time.UTC
+	}
+	if strings.TrimSpace(homepageURL) == "" {
+		homepageURL = h.cfg.Mail.HomepageURL
 	}
 
 	fields := h.templateFields(values)
@@ -154,7 +158,7 @@ func (h *Handler) templateData(values map[string]string) map[string]any {
 		"fields":       fields,
 		"Fields":       fields,
 		"contact_name": h.cfg.Mail.ContactName,
-		"homepage_url": h.cfg.Mail.HomepageURL,
+		"homepage_url": homepageURL,
 		"submitted_at": time.Now().In(location).Format(h.cfg.Mail.SubmittedAtFormat),
 		"mail":         h.cfg.Mail,
 	}
@@ -166,8 +170,16 @@ func (h *Handler) templateData(values map[string]string) map[string]any {
 		data[legacyTemplateName(item.Name)] = item.Value
 	}
 	data["ContactName"] = h.cfg.Mail.ContactName
-	data["URL"] = h.cfg.Mail.HomepageURL
+	data["URL"] = homepageURL
 	return data
+}
+
+func (h *Handler) homepageURLForRequest(c *gin.Context) string {
+	origin := strings.TrimSpace(c.Request.Header.Get("Origin"))
+	if origin != "" && h.isAllowedOrigin(origin) {
+		return origin
+	}
+	return h.cfg.Mail.HomepageURL
 }
 
 func (h *Handler) templateFields(values map[string]string) []templateFieldItem {
