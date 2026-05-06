@@ -274,6 +274,30 @@ func TestSendmailPostRendersTemplateAndSends(t *testing.T) {
 	}
 }
 
+func TestSendmailPostUsesRequestOriginForHomepageURL(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mail.HomepageURL = "https://configured.example"
+	cfg.Mail.TemplatePath = filepath.Join(t.TempDir(), "template.html")
+	if err := os.WriteFile(cfg.Mail.TemplatePath, []byte("{{ homepage_url }} {{ URL }}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sender := &fakeSender{}
+	router := testRouterWithConfig(t, cfg, sender)
+	req := validRequest(http.MethodPost, "/api/v1/sendmail")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	want := "http://localhost:5173 http://localhost:5173"
+	if sender.message.Body != want {
+		t.Fatalf("rendered body = %q, want %q", sender.message.Body, want)
+	}
+}
+
 func TestSendmailRejectsHeaderInjectionSubject(t *testing.T) {
 	sender := &fakeSender{}
 	router := testRouter(t, sender)
