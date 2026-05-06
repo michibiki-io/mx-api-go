@@ -79,6 +79,7 @@
   let loading = true;
   let error = '';
   let recoverableAuthError = false;
+  let metricsRange = '24h';
   let currentPage = 0;
   let pageCursors: Array<string | null> = [null];
   let pageStarts = [0];
@@ -111,6 +112,7 @@
   $: mailServerStateValue = mailServerState(me?.authDisabled, mailServerChecking, mailServerCheck);
   $: mailServerBadgeColorValue = mailServerBadgeColor(mailServerStateValue);
   $: mailServerStatusLabelValue = mailServerStatusLabel(mailServerStateValue);
+  $: adminUserLabel = me?.user || me?.email || '';
   $: chartData = {
     labels: metrics?.points.map((point) => new Date(point.timestamp).toLocaleString()) ?? [],
     datasets: [
@@ -181,7 +183,7 @@
   }
 
   async function loadMetrics(withAuthRecovery = false) {
-    const params = rangeToParams(filters.range);
+    const params = rangeToParams(metricsRange);
     if (filters.endpoint) params.set('endpoint', filters.endpoint);
     if (filters.method) params.set('method', filters.method);
     if (filters.result) params.set('result', filters.result);
@@ -210,6 +212,17 @@
       await loadAuditPage(0, false, true);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to apply filters';
+    }
+  }
+
+  async function applyMetricsRange(range: string) {
+    metricsRange = range;
+    error = '';
+    recoverableAuthError = false;
+    try {
+      await loadMetrics();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to load request metrics';
     }
   }
 
@@ -431,15 +444,12 @@
 
     <div class="flex min-h-screen flex-1 flex-col lg:pl-64">
       <header class="sticky top-0 z-20 flex min-h-16 items-center justify-end border-b border-slate-200 bg-slate-100/95 px-4 backdrop-blur sm:px-6 lg:px-8">
-        <div class="flex flex-col items-end gap-1 text-sm text-slate-600">
-          {#if me}
-            <div>
-              <span class="font-medium text-slate-900">{me.user}</span>
-              <span class="mx-2">/</span>
-              <span>{me.mode}</span>
-            </div>
-          {/if}
-        </div>
+        {#if me}
+          <div class="inline-flex min-w-0 items-center gap-2 text-sm text-slate-600" aria-label="Authenticated admin user">
+            <Icon icon="heroicons:user-circle" class="h-6 w-6 shrink-0 text-blue-700" />
+            <span class="max-w-48 truncate font-semibold text-slate-950">{adminUserLabel}</span>
+          </div>
+        {/if}
       </header>
 
       <div class="flex-1 px-4 py-5 sm:px-6 lg:px-8">
@@ -555,7 +565,7 @@
                 </div>
                 <div class="flex flex-wrap gap-2">
                   {#each ranges as range}
-                    <Button size="sm" color={filters.range === range.value ? 'blue' : 'alternative'} onclick={async () => { filters.range = range.value; await applyFilters(); }}>
+                    <Button size="sm" color={metricsRange === range.value ? 'blue' : 'alternative'} onclick={() => applyMetricsRange(range.value)}>
                       {range.label}
                     </Button>
                   {/each}
