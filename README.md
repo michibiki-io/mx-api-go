@@ -8,19 +8,19 @@
 
 - [Security Notice](#security-notice)
 - [English](#english)
-  - [API Reference](#english-api-reference)
-  - [Configuration](#english-configuration)
-  - [Admin Dashboard and Audit Logs](#english-admin-dashboard-and-audit-logs)
-  - [Mail Templates](#english-mail-templates)
-  - [Development](#english-development)
-  - [Build](#english-build)
+  - [API Reference](#api-reference)
+  - [Configuration](#configuration)
+  - [Admin Dashboard and Audit Logs](#admin-dashboard-and-audit-logs)
+  - [Mail Templates](#mail-templates)
+  - [Development](#development)
+  - [Build](#build)
 - [日本語](#日本語)
   - [API リファレンス](#api-リファレンス)
   - [設定](#設定)
   - [管理ダッシュボードと監査ログ](#管理ダッシュボードと監査ログ)
   - [Validation ルール](#validation-ルール)
   - [メールテンプレート](#メールテンプレート)
-  - [開発起動](#開発起動)
+  - [開発](#開発)
   - [ビルド](#ビルド)
 
 ## Security Notice
@@ -36,7 +36,7 @@
 
 ## English
 
-### English API Reference
+### API Reference
 
 The service exposes the following endpoints:
 
@@ -73,7 +73,7 @@ Validation errors use this response shape:
 }
 ```
 
-### English Configuration
+### Configuration
 
 `configs/config.yaml` is a local runtime file and is intentionally ignored by git because it may contain environment-specific values. Start from [configs/config.example.yaml](/home/staratlas@ad.michibiki.io/workspace/mx-api-go/configs/config.example.yaml), create your local config, and edit it for your environment:
 
@@ -154,7 +154,7 @@ Public `POST` requests are protected by a lightweight in-memory rate limiter. It
 
 SMTP credentials are intentionally read only from `SMTP_CLIENT_USERNAME` and `SMTP_CLIENT_PASSWORD`; YAML values for those fields are ignored.
 
-### English Admin Dashboard and Audit Logs
+### Admin Dashboard and Audit Logs
 
 `mx-api` can serve a lightweight administrator dashboard at `admin.dashboard.base_path` (default: `/admin`). The dashboard contains API/validation/mail/status doughnut charts, a backend mail server connectivity check, an API request trend chart, server-side audit log filters, pagination, a row detail modal, and a guarded audit-log reset dialog.
 
@@ -259,7 +259,7 @@ Audit log timestamps in the dashboard use Go time layouts. Set `MX_API_ADMIN_AUD
 
 The dashboard reset button opens a confirmation dialog. `POST /_admin/api/v1/audit-events/reset` requires `{"confirmation":"RESET"}`; existing audit events are deleted and a new `audit.reset` marker remains visible.
 
-### English Mail Templates
+### Mail Templates
 
 Templates are Jinja-style files rendered with Pongo2. The default template is embedded in the binary. Configure another file path when you need to replace it:
 
@@ -274,7 +274,7 @@ Template variables include all field names, `fields`, `contact_name`, `homepage_
 `fields` contains the submitted fields in configured `form.fields` order.
 `submitted_at` is formatted with `mail.timezone` and `mail.submitted_at_format`. The format string uses Go's time layout syntax.
 
-### English Development
+### Development
 
 Run the API and the lightweight development console:
 
@@ -354,7 +354,7 @@ npm run check
 npm run build
 ```
 
-### English Build
+### Build
 
 ```sh
 docker build -t mx-api .
@@ -669,7 +669,7 @@ template では、各 field 名、`fields`、`contact_name`、`homepage_url`、`
 `fields` は `form.fields` の設定順で並ぶ入力項目です。
 `submitted_at` は `mail.timezone` と `mail.submitted_at_format` で整形されます。format は Go の time layout 形式です。
 
-### 開発起動
+### 開発
 
 API と開発用 frontend を同時に起動します。
 
