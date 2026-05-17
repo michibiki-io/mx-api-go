@@ -65,6 +65,7 @@
   type ActiveView = 'dashboard' | 'audit';
   type MailServerState = 'disabled' | 'checking' | 'unknown' | 'error' | 'ok';
   type MailServerBadgeColor = 'green' | 'red' | 'yellow' | 'blue';
+  type PageNavItem = number | 'ellipsis';
 
   let me: AdminMe | null = null;
   let metrics: MetricsResponse | null = null;
@@ -106,8 +107,8 @@
     requestId: ''
   };
   $: pageSize = Number(auditPageSize) > 0 ? Math.min(Number(auditPageSize), 200) : 25;
-  $: pageRangeLabel = `${page.items.length ? pageStarts[currentPage] + 1 : 0}-${pageStarts[currentPage] + page.items.length}`;
   $: totalLabel = page.total ?? lastKnownTotal;
+  $: pageNavItems = buildPageNavItems(currentPage, pageCursors.length);
   $: currentThemeLabel = themeLabel($themePreference);
   $: currentThemeIcon = themeIcon($themePreference);
   $: pageTitle = activeView === 'audit' ? 'Audit Log' : 'Dashboard';
@@ -211,8 +212,11 @@
     const params = auditParams(filters, pageSize, cursor, includeTotal);
     try {
       const nextPage = withAuthRecovery ? await apiGetWithAuthRecovery<AuditPage>('/audit-events', params) : await apiGet<AuditPage>('/audit-events', params);
+      const currentStart = pageStarts[targetPage] ?? targetPage * pageSize;
       currentPage = targetPage;
       page = { ...nextPage, total: nextPage.total ?? lastKnownTotal };
+      pageCursors = knownPageCursors(targetPage, nextPage);
+      pageStarts = knownPageStarts(targetPage, currentStart, nextPage);
       if (typeof nextPage.total === 'number') {
         lastKnownTotal = nextPage.total;
       }
@@ -331,13 +335,17 @@
     if (!page.nextCursor || auditLoading) return;
     error = '';
     const nextIndex = currentPage + 1;
-    pageCursors = [...pageCursors.slice(0, nextIndex), page.nextCursor];
-    pageStarts = [...pageStarts.slice(0, nextIndex), pageStarts[currentPage] + page.items.length];
+    const rollbackCursors = pageCursors;
+    const rollbackStarts = pageStarts;
+    if (!pageCursors[nextIndex]) {
+      pageCursors = [...pageCursors.slice(0, nextIndex), page.nextCursor];
+      pageStarts = [...pageStarts.slice(0, nextIndex), pageStarts[currentPage] + page.items.length];
+    }
     try {
       await loadAuditPage(nextIndex);
     } catch (err) {
-      pageCursors = pageCursors.slice(0, nextIndex);
-      pageStarts = pageStarts.slice(0, nextIndex);
+      pageCursors = rollbackCursors;
+      pageStarts = rollbackStarts;
       error = err instanceof Error ? err.message : 'Failed to load next audit page';
     }
   }
@@ -349,6 +357,17 @@
       await loadAuditPage(currentPage - 1);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load previous audit page';
+    }
+  }
+
+  async function loadPageNumber(pageNumber: number) {
+    const pageIndex = pageNumber - 1;
+    if (pageIndex === currentPage || pageIndex < 0 || pageIndex >= pageCursors.length || auditLoading) return;
+    error = '';
+    try {
+      await loadAuditPage(pageIndex);
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to load audit page';
     }
   }
 
@@ -369,6 +388,52 @@
 
   function isRecoverableAuthError(err: unknown) {
     return err instanceof ApiError && isTransientAuthStatus(err.status);
+  }
+
+  function knownPageCursors(targetPage: number, nextPage: AuditPage) {
+    const cursors = pageCursors.slice();
+    if (nextPage.hasNext && nextPage.nextCursor) {
+      cursors[targetPage + 1] = nextPage.nextCursor;
+      return cursors;
+    }
+    return cursors.slice(0, targetPage + 1);
+  }
+
+  function knownPageStarts(targetPage: number, currentStart: number, nextPage: AuditPage) {
+    const starts = pageStarts.slice();
+    starts[targetPage] = currentStart;
+    if (nextPage.hasNext && nextPage.nextCursor) {
+      starts[targetPage + 1] = currentStart + nextPage.items.length;
+      return starts;
+    }
+    return starts.slice(0, targetPage + 1);
+  }
+
+  function buildPageNavItems(currentIndex: number, knownCount: number): PageNavItem[] {
+    const total = Math.max(1, knownCount);
+    const current = currentIndex + 1;
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, index) => index + 1);
+    }
+
+    const pages = new Set<number>([1, total, current - 1, current, current + 1]);
+    if (current <= 4) {
+      for (let pageNumber = 1; pageNumber <= 5; pageNumber += 1) pages.add(pageNumber);
+    }
+    if (current >= total - 3) {
+      for (let pageNumber = total - 4; pageNumber <= total; pageNumber += 1) pages.add(pageNumber);
+    }
+
+    const sortedPages = [...pages].filter((pageNumber) => pageNumber >= 1 && pageNumber <= total).sort((a, b) => a - b);
+    const items: PageNavItem[] = [];
+    for (const pageNumber of sortedPages) {
+      const previous = items[items.length - 1];
+      if (typeof previous === 'number' && pageNumber - previous > 1) {
+        items.push('ellipsis');
+      }
+      items.push(pageNumber);
+    }
+    return items;
   }
 
   function doughnutData(labels: string[], values: number[], colors: string[]) {
@@ -879,23 +944,48 @@
       </div>
 
       <nav class="pagination-bar px-5 pb-5 pt-3 text-sm" aria-label="Pagination">
-        <label class="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-          <span class="whitespace-nowrap font-medium">Rows per page</span>
-          <select class="admin-input w-24 py-2" bind:value={auditPageSize} onchange={changePageSize} disabled={auditLoading}>
-            {#each pageSizeOptions as option}
-              <option value={option}>{option}</option>
-            {/each}
-          </select>
-        </label>
-        <div class="text-center text-slate-500 dark:text-slate-400" aria-live="polite">
-          <span>Showing {pageRangeLabel} of {totalLabel}</span>
+        <div class="pagination-status text-slate-500 dark:text-slate-400" aria-live="polite">
+          <span>Page {currentPage + 1}</span>
+          <span>{page.items.length} events shown</span>
+          <span>{totalLabel} total</span>
           {#if auditLoading}
-            <span class="ml-2">Loading</span>
+            <span>Loading</span>
           {/if}
         </div>
-        <div class="flex justify-end gap-2">
-          <Button size="sm" color="alternative" disabled={currentPage === 0 || auditLoading} onclick={loadPreviousPage}>Previous</Button>
-          <Button size="sm" color="alternative" disabled={!page.hasNext || page.nextCursor === null || auditLoading} onclick={loadNextPage}>Next</Button>
+        <div class="pagination-controls">
+          <Button class="gap-2" size="sm" color="alternative" disabled={currentPage === 0 || auditLoading} onclick={loadPreviousPage}>
+            <Icon icon="heroicons:arrow-left" class="h-4 w-4" />
+            <span>Prev</span>
+          </Button>
+          <div class="pagination-pages" aria-label="Known pages">
+            {#each pageNavItems as item}
+              {#if item === 'ellipsis'}
+                <span class="pagination-ellipsis" aria-hidden="true">...</span>
+              {:else}
+                <button
+                  class={`pagination-page-button ${currentPage === item - 1 ? 'border-blue-600 bg-blue-50 text-blue-700 dark:border-sky-400 dark:bg-slate-800 dark:text-sky-200' : 'border-transparent text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:bg-slate-800'}`}
+                  aria-label={`Page ${item}`}
+                  aria-current={currentPage === item - 1 ? 'page' : undefined}
+                  disabled={auditLoading}
+                  onclick={() => loadPageNumber(item)}
+                >
+                  {item}
+                </button>
+              {/if}
+            {/each}
+          </div>
+          <Button class="gap-2" size="sm" color="alternative" disabled={!page.hasNext || page.nextCursor === null || auditLoading} onclick={loadNextPage}>
+            <span>Next</span>
+            <Icon icon="heroicons:arrow-right" class="h-4 w-4" />
+          </Button>
+          <label class="pagination-items text-slate-600 dark:text-slate-300">
+            <span class="sr-only">Items per page</span>
+            <select class="admin-input min-w-24 py-2" bind:value={auditPageSize} onchange={changePageSize} disabled={auditLoading}>
+              {#each pageSizeOptions as option}
+                <option value={option}>{option} Items</option>
+              {/each}
+            </select>
+          </label>
         </div>
       </nav>
             </section>
