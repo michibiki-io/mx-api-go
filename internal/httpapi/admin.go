@@ -100,14 +100,6 @@ func (h *Handler) adminAuditEvents(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load audit events"})
 		return
 	}
-	var nextCursor any
-	if filter.Cursor == "" && c.Query("cursor") == "" {
-		if page.HasNext {
-			nextCursor = filter.Offset + len(page.Items)
-		}
-	} else if page.NextCursor != "" {
-		nextCursor = page.NextCursor
-	}
 	h.recordAdminAPI(c, "audit.view", "Admin viewed audit logs")
 	responseTotal := any(nil)
 	if !filter.SkipTotal {
@@ -117,7 +109,7 @@ func (h *Handler) adminAuditEvents(c *gin.Context) {
 		"items":      h.auditEventResponses(page.Items),
 		"total":      responseTotal,
 		"hasNext":    page.HasNext,
-		"nextCursor": nextCursor,
+		"nextCursor": page.NextCursor,
 	})
 }
 
