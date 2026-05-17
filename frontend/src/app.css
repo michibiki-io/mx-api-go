@@ -2,37 +2,109 @@
 @plugin "flowbite/plugin";
 @source "../node_modules/flowbite-svelte";
 @source "../node_modules/flowbite";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  color-scheme: light;
   color: #0f172a;
-  background: #f8fafc;
+  background: #f4f7fb;
+  --app-bg: #f4f7fb;
+  --field-bg: #fff;
+  --field-label-bg: #fff;
+  --field-border: #cbd5e1;
+  --focus-ring: rgba(37, 99, 235, 0.16);
+}
+
+:root.dark {
+  color-scheme: dark;
+  color: #f8fafc;
+  background: #020617;
+  --app-bg: #020617;
+  --field-bg: #0f172a;
+  --field-label-bg: #0f172a;
+  --field-border: #475569;
+  --focus-ring: rgba(125, 211, 252, 0.22);
 }
 
 body {
   margin: 0;
+  background: var(--app-bg);
 }
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
+}
+
+.floating-field {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.floating-field .admin-input {
+  padding: 0.95rem 0.75rem 0.45rem;
+}
+
+.floating-label {
+  pointer-events: none;
+  position: absolute;
+  left: 0.6rem;
+  top: 0;
+  max-width: calc(100% - 1.2rem);
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--field-label-bg);
+  padding: 0 0.25rem;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1rem;
+  white-space: nowrap;
+}
+
+:root.dark .floating-label {
+  color: #cbd5e1;
 }
 
 .admin-input {
   width: 100%;
   min-width: 0;
   border-radius: 0.5rem;
-  border: 1px solid #cbd5e1;
-  background: #fff;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
   padding: 0.625rem 0.75rem;
-  color: #0f172a;
+  color: inherit;
   line-height: 1.25rem;
 }
 
 .admin-input:focus {
   border-color: #2563eb;
-  outline: 3px solid rgba(37, 99, 235, 0.16);
+  outline: 3px solid var(--focus-ring);
+}
+
+.admin-input::placeholder {
+  color: transparent;
+}
+
+.admin-input:focus::placeholder {
+  color: #94a3b8;
+}
+
+.pagination-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .pagination-bar {
+    grid-template-columns: 1fr;
+  }
 }

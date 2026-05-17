@@ -717,6 +717,68 @@ func TestAdminAuditEventsFiltersAndPaginates(t *testing.T) {
 	}
 }
 
+func TestAdminAuditEventsReturnsUsableNextCursor(t *testing.T) {
+	cfg := config.Default()
+	cfg.Admin.Auth.Mode = "none"
+	router, store := testRouterWithAudit(t, cfg, &fakeSender{})
+	base := time.Date(2026, 5, 1, 13, 24, 23, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		if err := store.Record(context.Background(), audit.Event{
+			Timestamp:  base.Add(time.Duration(i) * time.Second),
+			Actor:      "public",
+			Action:     "mail.send",
+			Method:     "POST",
+			Path:       "/api/v1/sendmail",
+			StatusCode: http.StatusOK,
+			Result:     audit.ResultSuccess,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/v1/audit-events?action=mail.send&limit=2", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var firstPage struct {
+		Items      []audit.Event `json:"items"`
+		Total      int           `json:"total"`
+		HasNext    bool          `json:"hasNext"`
+		NextCursor string        `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &firstPage); err != nil {
+		t.Fatalf("unmarshal first page: %v", err)
+	}
+	if firstPage.Total != 3 || len(firstPage.Items) != 2 || !firstPage.HasNext || firstPage.NextCursor == "" {
+		t.Fatalf("first page = %#v, want total 3, two items, and a next cursor", firstPage)
+	}
+	if _, err := audit.DecodeCursor(firstPage.NextCursor); err != nil {
+		t.Fatalf("next cursor is not decodable: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/_admin/api/v1/audit-events?action=mail.send&limit=2&cursor="+firstPage.NextCursor, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var secondPage struct {
+		Items   []audit.Event `json:"items"`
+		Total   int           `json:"total"`
+		HasNext bool          `json:"hasNext"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &secondPage); err != nil {
+		t.Fatalf("unmarshal second page: %v", err)
+	}
+	if secondPage.Total != 3 || len(secondPage.Items) != 1 || secondPage.HasNext {
+		t.Fatalf("second page = %#v, want total 3, one item, and no next page", secondPage)
+	}
+}
+
 func TestAdminAuditResetClearsEventsAndLeavesMarker(t *testing.T) {
 	cfg := config.Default()
 	cfg.Admin.Auth.Mode = "none"
