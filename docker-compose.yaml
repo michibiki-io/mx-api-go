@@ -2,6 +2,9 @@ services:
   api:
     build:
       context: .
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_VERSION: ${BUILD_VERSION:-dev}
     image: michibiki/mx-api:0.1.0
     restart: always
     env_file:
