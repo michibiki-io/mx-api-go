@@ -25,6 +25,7 @@ func (h *Handler) adminMe(c *gin.Context) {
 		"commit":               version.Commit(),
 		"shortCommit":          version.ShortCommit(),
 		"commitURL":            commitURL(version.Commit()),
+		"releaseTagURL":        releaseTagURL(version.Value()),
 		"auditTimestampFormat": h.cfg.Admin.Dashboard.TimestampFormat,
 	})
 }
@@ -179,6 +180,32 @@ func commitURL(commit string) string {
 		return ""
 	}
 	return "https://github.com/michibiki-io/mx-api-go/commit/" + commit
+}
+
+func releaseTagURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "dev" {
+		return ""
+	}
+	tag := value
+	if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag
+	}
+	parts := strings.Split(strings.TrimPrefix(tag, "v"), ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	for _, part := range parts {
+		if part == "" {
+			return ""
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return ""
+			}
+		}
+	}
+	return "https://github.com/michibiki-io/mx-api-go/releases/tag/" + tag
 }
 
 func (h *Handler) adminAuditReset(c *gin.Context) {

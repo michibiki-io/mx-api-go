@@ -604,6 +604,24 @@ func TestAdminNoneAuthModeAllowsAndReportsWarningState(t *testing.T) {
 	if body["commit"] == "" || body["shortCommit"] == "" {
 		t.Fatalf("commit fields missing: %#v", body)
 	}
+	if _, ok := body["releaseTagURL"].(string); !ok {
+		t.Fatalf("releaseTagURL payload missing: %#v", body)
+	}
+}
+
+func TestReleaseTagURL(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"1.2.3":  "https://github.com/michibiki-io/mx-api-go/releases/tag/v1.2.3",
+		"v1.2.3": "https://github.com/michibiki-io/mx-api-go/releases/tag/v1.2.3",
+		"dev":    "",
+		"1.2":    "",
+	}
+	for value, want := range cases {
+		if got := releaseTagURL(value); got != want {
+			t.Fatalf("releaseTagURL(%q) = %q, want %q", value, got, want)
+		}
+	}
 }
 
 func TestAdminMailServerCheckRequiresHeaderAuthAndDashboardToken(t *testing.T) {

@@ -61,6 +61,7 @@
 
   const pageSizeOptions = ['25', '50', '100', '200'];
   const sidebarStorageKey = 'mx-api-go.admin.sidebarCollapsed';
+  const appName = 'mx-api-go';
 
   type ActiveView = 'dashboard' | 'audit';
   type MailServerState = 'disabled' | 'checking' | 'unknown' | 'error' | 'ok';
@@ -74,6 +75,7 @@
   let activeView: ActiveView = 'dashboard';
   let selected: AuditEvent | null = null;
   let detailOpen = false;
+  let aboutOpen = false;
   let resetOpen = false;
   let resetConfirmation = '';
   let resetReason = '';
@@ -375,6 +377,11 @@
     window.location.reload();
   }
 
+  function openAboutModal() {
+    aboutOpen = true;
+    mobileMenuOpen = false;
+  }
+
   async function changePageSize() {
     error = '';
     recoverableAuthError = false;
@@ -573,8 +580,19 @@
         </button>
       </nav>
 
-      <div class={`mt-auto grid gap-3 border-t border-sky-100 px-3 py-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-400 ${sidebarCollapsed ? 'justify-items-center' : 'px-5'}`}>
-        <div class={`flex ${sidebarCollapsed ? 'justify-center' : 'justify-end'}`}>
+      <div class={`mt-auto border-t border-sky-100 px-3 py-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-400 ${sidebarCollapsed ? 'grid justify-items-center' : 'px-5'}`}>
+        <div class={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+          {#if me && !sidebarCollapsed}
+            <button
+              class="inline-flex min-h-10 min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-slate-600 hover:bg-white/45 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-sky-300"
+              aria-label={`About ${appName} ${me.version}`}
+              title={`About ${appName} ${me.version}`}
+              onclick={openAboutModal}
+            >
+              <Icon icon="heroicons:information-circle" class="h-4 w-4 shrink-0" />
+              <span class="truncate">Version {me.version}</span>
+            </button>
+          {/if}
           <button
             class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-sky-100 bg-transparent text-slate-700 hover:bg-white/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-slate-800 dark:text-slate-100 dark:hover:bg-slate-900"
             aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -585,18 +603,6 @@
             <Icon icon={sidebarCollapsed ? 'lucide:panel-left-open' : 'lucide:panel-left-close'} class="h-5 w-5" />
           </button>
         </div>
-        {#if me && !sidebarCollapsed}
-          <div class="min-w-0">
-            {#if me.commitURL}
-              <a class="inline-flex max-w-full items-center gap-1.5 truncate text-slate-700 hover:text-blue-700 hover:underline dark:text-slate-300 dark:hover:text-sky-300" href={me.commitURL} target="_blank" rel="noreferrer">
-                <Icon icon="mdi:github" class="h-4 w-4 shrink-0" />
-                <span class="truncate">{me.shortCommit}</span>
-              </a>
-            {:else}
-              <span class="block truncate">Commit {me.shortCommit}</span>
-            {/if}
-          </div>
-        {/if}
       </div>
     </aside>
 
@@ -675,6 +681,16 @@
               <Icon icon="lets-icons:order" class="h-5 w-5" />
               <span>Audit Log</span>
             </button>
+            {#if me}
+              <button
+                class="mt-2 inline-flex min-h-11 items-center justify-end gap-2 border-t border-sky-100 px-3 pt-3 text-sm text-slate-600 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-slate-800 dark:text-slate-300 dark:hover:text-sky-300"
+                aria-label={`About ${appName} ${me.version}`}
+                onclick={openAboutModal}
+              >
+                <Icon icon="heroicons:information-circle" class="h-4 w-4" />
+                <span>Version {me.version}</span>
+              </button>
+            {/if}
           </nav>
         </div>
       {/if}
@@ -995,6 +1011,41 @@
     </div>
   </div>
 </main>
+
+{#if aboutOpen && me}
+  <div class="fixed inset-0 z-50 overflow-hidden bg-slate-950/45 px-[5vw] py-[10vh] sm:flex sm:items-center sm:justify-center sm:p-4" role="presentation">
+    <div class="box-border max-h-[80vh] w-full overflow-auto rounded-lg border border-slate-300 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900 sm:max-h-[calc(100vh-2rem)] sm:max-w-lg" role="dialog" aria-modal="true" aria-labelledby="about-application-title">
+      <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-5 sm:py-4">
+        <h2 id="about-application-title" class="min-w-0 truncate text-base font-semibold text-slate-950 dark:text-slate-100">About This Application</h2>
+        <div class="flex shrink-0 items-center gap-2">
+          {#if me.releaseTagURL}
+            <a
+              class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-sky-300"
+              href={me.releaseTagURL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open release tag on GitHub"
+              title="Open release tag on GitHub"
+            >
+              <Icon icon="bi:github" class="h-5 w-5" />
+            </a>
+          {/if}
+          <button class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:text-slate-300 dark:hover:bg-slate-800" aria-label="Close application information" onclick={() => (aboutOpen = false)}>
+            <Icon icon="lets-icons:close-round" class="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+      <div class="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
+        <p class="text-sm text-slate-600 dark:text-slate-300">Administrative dashboard for mx-api-go service operations.</p>
+        <div class="grid gap-3 text-sm sm:grid-cols-2">
+          <Detail label="Application" value={appName} />
+          <Detail label="Version" value={me.version} />
+          <Detail label="Git hash" value={me.commit} wide />
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if detailOpen && selected}
   <div class="fixed inset-0 z-50 overflow-hidden bg-slate-950/45 px-[5vw] py-[10vh] sm:flex sm:items-center sm:justify-center sm:p-4" role="presentation">
